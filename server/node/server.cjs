@@ -250,6 +250,6 @@ app.post('/api/write', async (req, res, next) => {
     }
 });
 
-app.listen(6001, () => {
-    console.log("Server is listening on http://localhost:6001/");
+app.listen(3000, '0.0.0.0', () => {
+    console.log("Server is listening on http://0.0.0.0:3000/");
 });
