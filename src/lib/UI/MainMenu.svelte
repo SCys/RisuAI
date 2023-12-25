@@ -9,7 +9,11 @@
   import { getRisuHub } from "src/ts/characterCards";
   import RisuHubIcon from "./Realm/RealmHubIcon.svelte";
   import Title from "./Title.svelte";
+  import { getPatchNote } from "src/etc/updateLog";
+  import { parseMarkdownSafe } from "src/ts/parser";
   let openHub = false
+  const patch = getPatchNote(appVer)
+  let patchNodeHidden = true
 
 </script>
 <div class="h-full w-full flex flex-col overflow-y-auto items-center">
@@ -21,6 +25,17 @@
         <h3 class="text-textcolor2 mt-1">Version {appVer}</h3>
       {/if}
       <GithubStars />
+      {#if patch}
+        <div class="w-full max-w-4xl pl-4 pr-4 pt-4">
+          <div class="bg-darkbg rounded-md p-6 flex flex-col transition-shadow overflow-y-hidden shadow-inner"
+            on:click={() => {patchNodeHidden = false}}
+            class:max-h-40={patchNodeHidden}>
+              <div class="prose prose-invert">
+                {@html parseMarkdownSafe(patch)}
+              </div>
+          </div>
+        </div>
+      {/if}
     {/if}
     <div class="w-full flex p-4 flex-col text-textcolor max-w-4xl">
       {#if !openHub}

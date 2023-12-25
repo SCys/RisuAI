@@ -32,6 +32,7 @@ export interface OpenAIChat{
     memo?:string
     name?:string
     removable?:boolean
+    attr?:string[]
 }
 
 export interface OpenAIChatFull extends OpenAIChat{
@@ -179,12 +180,13 @@ export async function sendChat(chatProcessIndex = -1,arg:{chatAdditonalTokens?:n
     }
 
     let promptTemplate = cloneDeep(db.promptTemplate)
+    const usingPromptTemplate = !!promptTemplate
     if(promptTemplate){
         promptTemplate.push({
             type: 'postEverything'
         })
     }
-    if(currentChar.utilityBot){
+    if(currentChar.utilityBot && (!(usingPromptTemplate && db.proomptSettings.utilOverride))){
         promptTemplate = [
             {
               "type": "plain",
@@ -392,6 +394,12 @@ export async function sendChat(chatProcessIndex = -1,arg:{chatAdditonalTokens?:n
                 }
                 case 'postEverything':{
                     await tokenizeChatArray(unformated.postEverything)
+                    if(usingPromptTemplate && db.proomptSettings.postEndInnerFormat){
+                        await tokenizeChatArray([{
+                            role: 'system',
+                            content: db.proomptSettings.postEndInnerFormat
+                        }])
+                    }
                     break
                 }
                 case 'plain':
@@ -445,7 +453,11 @@ export async function sendChat(chatProcessIndex = -1,arg:{chatAdditonalTokens?:n
                     if(start >= end){
                         break
                     }
-                    const chats = unformated.chats.slice(start, end)
+                    let chats = unformated.chats.slice(start, end)
+
+                    if(usingPromptTemplate && db.proomptSettings.sendChatAsSystem && (!card.chatAsOriginalOnSystem)){
+                        chats = systemizeChat(chats)
+                    }
                     await tokenizeChatArray(chats)
                     break
                 }
@@ -490,6 +502,11 @@ export async function sendChat(chatProcessIndex = -1,arg:{chatAdditonalTokens?:n
             content: await (processScript(nowChatroom,
                 risuChatParser(firstMsg, {chara: currentChar, rmVar: true}),
             'editprocess'))
+        }
+
+        if(usingPromptTemplate && db.proomptSettings.sendName){
+            chat.content = `${currentChar.name}: ${chat.content}`
+            chat.attr = ['nameAdded']
         }
         chats.push(chat)
         currentTokens += await tokenizer.tokenizeChat(chat)
@@ -555,11 +572,18 @@ export async function sendChat(chatProcessIndex = -1,arg:{chatAdditonalTokens?:n
             }
         }
 
+        let attr:string[] = []
+
+        if(nowChatroom.type === 'group' || (usingPromptTemplate && db.proomptSettings.sendName)){
+            formedChat = name + ': ' + formedChat
+            attr.push('nameAdded')
+        }
+
         const chat:OpenAIChat = {
             role: msg.role === 'user' ? 'user' : 'assistant',
             content: formedChat,
             memo: msg.chatId,
-            name: name
+            attr: attr
         }
         chats.push(chat)
         currentTokens += await tokenizer.tokenizeChat(chat)
@@ -729,6 +753,12 @@ export async function sendChat(chatProcessIndex = -1,arg:{chatAdditonalTokens?:n
                 }
                 case 'postEverything':{
                     pushPrompts(unformated.postEverything)
+                    if(usingPromptTemplate && db.proomptSettings.postEndInnerFormat){
+                        pushPrompts([{
+                            role: 'system',
+                            content: db.proomptSettings.postEndInnerFormat
+                        }])
+                    }
                     break
                 }
                 case 'plain':
@@ -783,7 +813,10 @@ export async function sendChat(chatProcessIndex = -1,arg:{chatAdditonalTokens?:n
                         break
                     }
 
-                    const chats = unformated.chats.slice(start, end)
+                    let chats = unformated.chats.slice(start, end)
+                    if(usingPromptTemplate && db.proomptSettings.sendChatAsSystem && (!card.chatAsOriginalOnSystem)){
+                        chats = systemizeChat(chats)
+                    }
                     pushPrompts(chats)
                     break
                 }
@@ -1244,4 +1277,22 @@ export async function sendChat(chatProcessIndex = -1,arg:{chatAdditonalTokens?:n
     }
 
     return true
+}
+
+function systemizeChat(chat:OpenAIChat[]){
+    for(let i=0;i<chat.length;i++){
+        if(chat[i].role === 'user' || chat[i].role === 'assistant'){
+            const attr = chat[i].attr ?? []
+            if(chat[i].name?.startsWith('example_')){
+                chat[i].content = chat[i].name + ': ' + chat[i].content
+            }
+            else if(!attr.includes('nameAdded')){
+                chat[i].content = chat[i].role + ': ' + chat[i].content
+            }
+            chat[i].role = 'system'
+            delete chat[i].memo
+            delete chat[i].name
+        }
+    }
+    return chat
 }
