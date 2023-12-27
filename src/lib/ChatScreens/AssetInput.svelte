@@ -36,7 +36,7 @@
                 return
             }
             for(const f of da){
-                console.log(f)
+                // console.log(f)
                 const img = f.data
                 const name = f.name
                 const extension = name.split('.').pop().toLowerCase()

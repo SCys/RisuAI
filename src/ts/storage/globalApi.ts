@@ -700,6 +700,8 @@ export async function globalFetch(url:string, arg:{
                             headers: Object.fromEntries(da.headers)
                         }   
                     } catch (error) {
+                        console.error(`convert error: ${error}`)
+
                         addFetchLog(daText, false)
                         let errorMsg = (daText.startsWith('<!DOCTYPE')) ? ("Responded HTML. is your url, api key and password correct?") : (daText)
                         return {

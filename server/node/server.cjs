@@ -70,6 +70,7 @@ const reverseProxyFunc = async (req, res, next) => {
         head.delete('clear-site-data');
         head.delete('Cache-Control');
         head.delete('content-encoding'); // fix invalid header
+        head.delete('content-length'); // fix invalid header
         const headObj = {};
         for (let [k, v] of head) {
             headObj[k] = v;
