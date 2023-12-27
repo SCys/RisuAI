@@ -69,6 +69,7 @@ const reverseProxyFunc = async (req, res, next) => {
         head.delete('content-security-policy-report-only');
         head.delete('clear-site-data');
         head.delete('Cache-Control');
+        head.delete('content-encoding'); // fix invalid header
         const headObj = {};
         for (let [k, v] of head) {
             headObj[k] = v;
@@ -78,9 +79,7 @@ const reverseProxyFunc = async (req, res, next) => {
         // send response status to client
         res.status(originalResponse.status);
         // send response body to client
-        await pipeline(originalResponse.body, res);
-
-
+        await pipeline(originalBody, res);
     }
     catch (err) {
         next(err);
