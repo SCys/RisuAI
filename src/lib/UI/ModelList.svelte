@@ -37,6 +37,8 @@
                 return "GPT-4 32k 0613"
             case "gpt4_1106":
                 return "GPT-4 Turbo 1106"
+            case 'gpt45':
+                return 'GPT-4.5'
             case "gpt35_1106":
                 return "GPT-3.5 Turbo 1106"
             case 'local_gptq':
