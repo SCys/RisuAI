@@ -209,8 +209,10 @@
                 <OptionInput value="anthropic/claude-v1-100k">Claude v1 100k</OptionInput>
                 <OptionInput value="anthropic/claude-1.2">Claude v1.2</OptionInput>
             {:else}
+                <OptionInput value={"risu/free"}>Free Auto</OptionInput>
+                <OptionInput value={"openrouter/auto"}>Openrouter Auto</OptionInput>
                 {#each m as model}
-                    <OptionInput value={model}>{model}</OptionInput>
+                    <OptionInput value={model.id}>{model.name}</OptionInput>
                 {/each}
             {/if}
         </SelectInput>
@@ -312,6 +314,12 @@
     <SliderInput min={0} max={200} bind:value={$DataBase.temperature}/>
 {/if}
 <span class="text-textcolor2 mb-6 text-sm">{($DataBase.temperature / 100).toFixed(2)}</span>
+
+{#if $DataBase.aiModel.startsWith('openrouter')}
+    <span class="text-textcolor">Top K</span>
+    <SliderInput min={0} max={100} step={1} bind:value={$DataBase.top_k}/>
+    <span class="text-textcolor2 mb-6 text-sm">{($DataBase.top_k).toFixed(0)}</span>
+{/if}
 
 {#if $DataBase.aiModel === 'textgen_webui' || $DataBase.aiModel === 'mancer' || $DataBase.aiModel.startsWith('local_')}
     <span class="text-textcolor">Repetition Penalty</span>

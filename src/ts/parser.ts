@@ -64,6 +64,14 @@ DOMPurify.addHook("uponSanitizeAttribute", (node, data) => {
             }
             break
         }
+        case 'href':{
+            if(data.attrValue.startsWith('http://') || data.attrValue.startsWith('https://')){
+                node.setAttribute('target', '_blank')
+                break
+            }
+            data.attrValue = ''
+            break
+        }
     }
 })
 
@@ -171,7 +179,6 @@ export async function ParseMarkdown(data:string, charArg:(character|simpleCharac
         return (DOMPurify.sanitize(autoMarkNew(data), {
             ADD_TAGS: ["iframe", "style", "risu-style", "x-em"],
             ADD_ATTR: ["allow", "allowfullscreen", "frameborder", "scrolling", "risu-btn"],
-            FORBID_ATTR: ["href"]
         }))
     }
     else{
@@ -180,7 +187,6 @@ export async function ParseMarkdown(data:string, charArg:(character|simpleCharac
         return decodeStyle(DOMPurify.sanitize(data, {
             ADD_TAGS: ["iframe", "style", "risu-style", "x-em"],
             ADD_ATTR: ["allow", "allowfullscreen", "frameborder", "scrolling", "risu-btn"],
-            FORBID_ATTR: ["href"]
         }))
     }
 }
@@ -305,7 +311,7 @@ async function resizeAndConvert(imageData: Uint8Array): Promise<Buffer> {
 
 type ImageType = 'JPEG' | 'PNG' | 'GIF' | 'BMP' | 'AVIF' | 'WEBP' | 'Unknown';
 
-function checkImageType(arr:Uint8Array):ImageType {
+export function checkImageType(arr:Uint8Array):ImageType {
     const isJPEG = arr[0] === 0xFF && arr[1] === 0xD8 && arr[arr.length-2] === 0xFF && arr[arr.length-1] === 0xD9;
     const isPNG = arr[0] === 0x89 && arr[1] === 0x50 && arr[2] === 0x4E && arr[3] === 0x47 && arr[4] === 0x0D && arr[5] === 0x0A && arr[6] === 0x1A && arr[7] === 0x0A;
     const isGIF = arr[0] === 0x47 && arr[1] === 0x49 && arr[2] === 0x46 && arr[3] === 0x38 && (arr[4] === 0x37 || arr[4] === 0x39) && arr[5] === 0x61;
@@ -322,7 +328,7 @@ function checkImageType(arr:Uint8Array):ImageType {
     return "Unknown";
 }
 
-function isAPNG(pngData: Uint8Array): boolean {
+export function isAPNG(pngData: Uint8Array): boolean {
     const pngSignature = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
     const acTL = [0x61, 0x63, 0x54, 0x4C];
   

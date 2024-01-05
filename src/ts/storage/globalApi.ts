@@ -23,6 +23,9 @@ import { AutoStorage } from "./autoStorage";
 import { updateAnimationSpeed } from "../gui/animation";
 import { updateColorScheme, updateTextTheme } from "../gui/colorscheme";
 import { saveDbKei } from "../kei/backup";
+import { Capacitor, CapacitorHttp } from '@capacitor/core';
+import * as CapFS from '@capacitor/filesystem'
+import { save } from "@tauri-apps/api/dialog";
 
 //@ts-ignore
 export const isTauri = !!window.__TAURI__
@@ -70,6 +73,18 @@ let fileCache:{
 let pathCache:{[key:string]:string} = {}
 let checkedPaths:string[] = []
 
+async function checkCapFileExists(getUriOptions: CapFS.GetUriOptions): Promise<boolean> {
+    try {
+      await CapFS.Filesystem.stat(getUriOptions);
+      return true;
+    } catch (checkDirException) {
+      if (checkDirException.message === 'File does not exist') {
+        return false;
+      } else {
+        throw checkDirException;
+      }
+    }
+  }
 export async function getFileSrc(loc:string) {
     if(isTauri){
         if(loc.startsWith('assets')){
@@ -88,11 +103,23 @@ export async function getFileSrc(loc:string) {
         }
         return convertFileSrc(loc)
     }
-    try {
-
-        if(forageStorage.isAccount && loc.startsWith('assets')){
-            return hubURL + `/rs/` + loc
+    if(forageStorage.isAccount && loc.startsWith('assets')){
+        return hubURL + `/rs/` + loc
+    }
+    if(Capacitor.isNativePlatform()){
+        if(!await checkCapFileExists({
+            path: loc,
+            directory: CapFS.Directory.External
+        })){
+            return ''
         }
+        const uri = await CapFS.Filesystem.getUri({
+            path: loc,
+            directory: CapFS.Directory.External
+        })
+        return Capacitor.convertFileSrc(uri.uri)
+    }
+    try {
         if(usingSw){
             const encoded = Buffer.from(loc,'utf-8').toString('hex')
             let ind = fileCache.origin.indexOf(loc)
@@ -403,7 +430,7 @@ export async function loadData() {
                 if(isDriverMode){
                     return
                 }
-                if(navigator.serviceWorker){
+                if(navigator.serviceWorker && (!Capacitor.isNativePlatform())){
                     usingSw = true
                     await navigator.serviceWorker.register("/sw.js", {
                         scope: "/"
@@ -630,6 +657,42 @@ export async function globalFetch(url:string, arg:{
                     data: result.data,
                     headers: result.headers
                 }
+            }
+        }
+        else if (Capacitor.isNativePlatform()){
+            const body = arg.body
+            const headers = arg.headers ?? {}
+            if(arg.body instanceof URLSearchParams){
+                if(!headers["Content-Type"]){
+                    headers["Content-Type"] =  `application/x-www-form-urlencoded`
+                }
+            }
+            else{
+                if(!headers["Content-Type"]){
+                    headers["Content-Type"] =  `application/json`
+                }
+            }
+            const res = await CapacitorHttp.request({
+                url: url,
+                method: method,
+                headers: headers,
+                data: body,
+                responseType: arg.rawResponse ? 'arraybuffer' : 'json'
+            })
+
+            if(arg.rawResponse){
+                addFetchLog("Uint8Array Response", true)
+                return {
+                    ok: true,
+                    data: new Uint8Array(res.data as ArrayBuffer),
+                    headers: res.headers
+                }
+            }
+            addFetchLog(res.data, true)
+            return {
+                ok: true,
+                data: res.data,
+                headers: res.headers
             }
         }
         else{
@@ -1052,4 +1115,101 @@ export function getModelMaxContext(model:string):number|undefined{
     }
 
     return undefined
+}
+
+class TauriWriter{
+    path: string
+    firstWrite: boolean = true
+    constructor(path: string){
+        this.path = path
+    }
+
+    async write(data:Uint8Array) {
+        await writeBinaryFile(this.path, data, {
+            append: !this.firstWrite
+        })
+        this.firstWrite = false
+    }
+
+    async close(){
+        // do nothing
+    }
+}
+
+class MobileWriter{
+    path: string
+    firstWrite: boolean = true
+    constructor(path: string){
+        this.path = path
+    }
+
+    async write(data:Uint8Array) {
+        if(this.firstWrite){
+            if(!await CapFS.Filesystem.checkPermissions()){
+                await CapFS.Filesystem.requestPermissions()
+            }
+            await CapFS.Filesystem.writeFile({
+                path: this.path,
+                data: Buffer.from(data).toString('base64'),
+                recursive: true,
+                directory: CapFS.Directory.Documents
+            })
+        }
+        else{
+            await CapFS.Filesystem.appendFile({
+                path: this.path,
+                data: Buffer.from(data).toString('base64'),
+                directory: CapFS.Directory.Documents
+            })
+        }
+        
+        this.firstWrite = false
+    }
+
+    async close(){
+        // do nothing
+    }
+}
+
+
+export class LocalWriter{
+    writer: WritableStreamDefaultWriter|TauriWriter|MobileWriter
+    async init(name = 'Binary', ext = ['bin']) {
+        if(isTauri){
+            const filePath = await save({
+                filters: [{
+                  name: name,
+                  extensions: ext
+                }]
+            });
+            if(!filePath){
+                return false
+            }
+            this.writer = new TauriWriter(filePath)
+            return true
+        }
+        if(Capacitor.isNativePlatform()){
+            this.writer = new MobileWriter(name + '.' + ext[0])
+            return true
+        }
+        const streamSaver = await import('streamsaver')
+        const writableStream = streamSaver.createWriteStream(name + '.' + ext[0])
+        this.writer = writableStream.getWriter()
+        return true
+    }
+    async writeBackup(name:string,data: Uint8Array){
+        const encodedName = new TextEncoder().encode(getBasename(name))
+        const nameLength = new Uint32Array([encodedName.byteLength])
+        await this.writer.write(new Uint8Array(nameLength.buffer))
+        await this.writer.write(encodedName)
+        const dataLength = new Uint32Array([data.byteLength])
+        await this.writer.write(new Uint8Array(dataLength.buffer))
+        await this.writer.write(data)
+    }
+    async write(data:Uint8Array) {
+        await this.writer.write(data)
+    }
+    async close(){
+        await this.writer.close()
+    }
 }

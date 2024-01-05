@@ -15,7 +15,7 @@ import type { OobaChatCompletionRequestParams } from '../model/ooba';
 
 export const DataBase = writable({} as any as Database)
 export const loadedStore = writable(false)
-export let appVer = "1.69.5"
+export let appVer = "1.70.3"
 export let webAppSubVer = ''
 
 export function setDatabase(data:Database){
@@ -370,6 +370,7 @@ export function setDatabase(data:Database){
         utilOverride: false
     }
     data.keiServerURL ??= ''
+    data.top_k ??= 0
 
     changeLanguage(data.language)
     DataBase.set(data)
@@ -581,7 +582,8 @@ export interface Database{
             messages: number
             chats: number
         }
-    }
+    },
+    top_k:number
 }
 
 export interface customscript{

@@ -19,6 +19,8 @@ import { v4 } from "uuid";
 import { cloneDeep } from "lodash";
 import { supportsInlayImage } from "../image";
 import { OaifixEmdash } from "../plugins/fixer";
+import { Capacitor } from "@capacitor/core";
+import { getFreeOpenRouterModel } from "../model/openrouter";
 
 
 
@@ -278,9 +280,13 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
 
             const oaiFunctionCall = oaiFunctions ? (arg.useEmotion ? {"name": "set_emotion"} : "auto") : undefined
             let requestModel = (aiModel === 'reverse_proxy' || aiModel === 'openrouter') ? db.proxyRequestModel : aiModel
-
+            let openrouterRequestModel = db.openrouterRequestModel
             if(aiModel === 'reverse_proxy' && db.proxyRequestModel === 'custom'){
                 requestModel = db.customProxyRequestModel
+            }
+
+            if(aiModel === 'openrouter' && db.openrouterRequestModel === 'risu/free'){
+                openrouterRequestModel = await getFreeOpenRouterModel()
             }
 
             if(aiModel.startsWith('mistral')){
@@ -383,7 +389,7 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
 
             db.cipherChat = false
             let body = ({
-                model: aiModel === 'openrouter' ? db.openrouterRequestModel :
+                model: aiModel === 'openrouter' ? openrouterRequestModel :
                     requestModel ===  'gpt35' ? 'gpt-3.5-turbo'
                     : requestModel ===  'gpt35_0613' ? 'gpt-3.5-turbo-0613'
                     : requestModel ===  'gpt35_16k' ? 'gpt-3.5-turbo-16k'
@@ -419,6 +425,13 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
             if(db.putUserOpen){
                 // @ts-ignore
                 body.user = getOpenUserString()
+            }
+
+            if(aiModel === 'openrouter'){
+                if(db.top_k !== 0){
+                    //@ts-ignore
+                    body.top_k = db.top_k
+                }
             }
 
             if(aiModel === 'reverse_proxy' && db.reverseProxyOobaMode){
@@ -483,7 +496,7 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
                 // @ts-ignore
                 body.n = db.genTime
             }
-            let throughProxi = (!isTauri) && (!isNodeServer) && (!db.usePlainFetch)
+            let throughProxi = (!isTauri) && (!isNodeServer) && (!db.usePlainFetch) && (!Capacitor.isNativePlatform())
             if(db.useStreaming && arg.useStreaming && (!multiGen)){
                 body.stream = true
                 let urlHost = new URL(replacerURL).host
@@ -1532,25 +1545,12 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
                     "prompt": proompt,
                     "params": {
                         "n": 1,
-                        "frmtadsnsp": false,
-                        "frmtrmblln": false,
-                        "frmtrmspch": false,
-                        "frmttriminc": false,
                         "max_context_length": db.maxContext + 100,
                         "max_length": db.maxResponse,
-                        "rep_pen": 3,
-                        "rep_pen_range": 0,
-                        "rep_pen_slope": 10,
                         "singleline": false,
                         "temperature": db.temperature / 100,
-                        "tfs": 1,
-                        "top_a": 1,
-                        "top_k": 100,
-                        "top_p": 1,
-                        "typical": 1,
-                        "sampler_order": [
-                            0
-                        ]
+                        "top_k": db.top_k,
+                        "top_p": db.top_p,
                     },
                     "trusted_workers": false,
                     "workerslow_workers": true,
@@ -1559,12 +1559,21 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
                     "models": [realModel, realModel.trim(), ' ' + realModel, realModel + ' ']
                 }
 
+                if(realModel === 'auto'){
+                    delete argument.models
+                }
+
+                let apiKey = '0000000000'
+                if(db.hordeConfig.apiKey.length > 2){
+                    apiKey = db.hordeConfig.apiKey
+                }
+
                 const da = await fetch("https://stablehorde.net/api/v2/generate/text/async", {
                     body: JSON.stringify(argument),
                     method: "POST",
                     headers: {
                         "content-type": "application/json",
-                        "apikey": db.hordeConfig.apiKey
+                        "apikey": apiKey
                     },
                     signal: abortSignal
                 })

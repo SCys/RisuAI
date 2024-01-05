@@ -110,7 +110,16 @@ export const languageEnglish = {
         themeDescWifuCut: "Suitable for mobile",
         themeDescClassic: "Suitable for All devices",
         texttheme: "Select your text color",
-        inputName: "Lastly, Input your Nickname."
+        inputName: "Lastly, Input your Nickname.",
+        welcome: "Welcome to RisuAI! Here, I will guide you to setup. First, What may I call you?",
+        welcome2: "Hello {username}! before we start, I will ask you some questions. You can change these settings later in settings.\n\nFirst select the AI provider.",
+        openAIProvider: "OpenAI GPT is a high quality AI model, but it is paid and filtered.",
+        openrouterProvider: "Openrouter has a lot of models, some of them unfiltered and some of them free, but it is not as good as OpenAI.",
+        hordeProvider: "Horde is a free provider, but the response time is long and the quality is low.",
+        setProviderLater: "There are other providers, but you can set it later in settings. select this if you want to set it later.",
+        setupOpenAI: "To use OpenAI, you need to get an API key. \n1. go to https://beta.openai.com/ \n2. login with your account \n3. go to https://beta.openai.com/account/api-keys \n4. click 'Create New API Key' and name your key whatever you want. \n5. copy the key in the website.\n6. go back to RisuAI\n7. paste it, and click send button.",
+        setupOpenrouter: "To use Openrouter, you need to get an API key. \n1. go to https://openrouter.ai/keys\n2. click 'Create Key'\n3. set key name whatever you want.\n4. copy the key in the website\n5. go back to RisuAI\n6. paste it, and click send button.",
+        allDone: "All Done! please wait a moment.",
     },
     confirm: "Confirm",
     goback: "Go Back",
@@ -474,4 +483,5 @@ export const languageEnglish = {
     template: "Template",
     chatAsOriginalOnSystem: "Send as original role",
     exportAsDataset: "Export Save as Dataset",
+    editTranslationDisplay: "Edit Translation Display",
 }
