@@ -11,7 +11,7 @@ import { checkOldDomain, checkUpdate } from "../update";
 import { botMakerMode, selectedCharID } from "../stores";
 import { Body, ResponseType, fetch as TauriFetch } from "@tauri-apps/api/http";
 import { loadPlugins } from "../plugins/plugins";
-import { alertConfirm, alertError } from "../alert";
+import { alertConfirm, alertError, alertNormal } from "../alert";
 import { checkDriverInit, syncDrive } from "../drive/drive";
 import { hasher } from "../parser";
 import { characterURLImport, hubURL } from "../characterCards";
@@ -231,6 +231,15 @@ export async function saveAsset(data:Uint8Array, customId:string = '', fileName:
     }
 }
 
+export async function loadAsset(id:string){
+    if(isTauri){
+        return await readBinaryFile(id,{dir: BaseDirectory.AppData})
+    }
+    else{
+        return await forageStorage.getItem(id) as Uint8Array
+    }
+}
+
 let lastSave = ''
 
 export async function saveDb(){
@@ -432,15 +441,7 @@ export async function loadData() {
                 }
                 if(navigator.serviceWorker && (!Capacitor.isNativePlatform())){
                     usingSw = true
-                    await navigator.serviceWorker.register("/sw.js", {
-                        scope: "/"
-                    });
-
-                    await sleep(100)
-                    const da = await fetch('/sw/init')
-                    if(!(da.status >= 200 && da.status < 300)){
-                        location.reload()
-                    }
+                    await registerSw()
                 }
                 else{
                     usingSw = false
@@ -794,6 +795,20 @@ export async function globalFetch(url:string, arg:{
     }
 }
 
+async function registerSw() {
+    await navigator.serviceWorker.register("/sw.js", {
+        scope: "/"
+    });
+    await sleep(100)
+    const da = await fetch('/sw/init')
+    if(!(da.status >= 200 && da.status < 300)){
+        location.reload()
+    }
+    else{
+
+    }
+}
+
 const re = /\\/g
 function getBasename(data:string){
     const splited = data.replace(re, '/').split('/')
@@ -833,6 +848,13 @@ export function getUnpargeables(db:Database, uptype:'basename'|'pure' = 'basenam
             if(cha.additionalAssets){
                 for(const em of cha.additionalAssets){
                     addUnparge(em[1])
+                }
+            }
+            if(cha.vits){
+                const keys = Object.keys(cha.vits.files)
+                for(const key of keys){
+                    const vit = cha.vits.files[key]
+                    addUnparge(vit)
                 }
             }
         }
@@ -1046,7 +1068,7 @@ async function pargeChunks(){
         const assets = await readDir('assets', {dir: BaseDirectory.AppData})
         for(const asset of assets){
             const n = getBasename(asset.name)
-            if(unpargeable.includes(n) || (!n.endsWith('png'))){
+            if(unpargeable.includes(n)){
             }
             else{
                 await removeFile(asset.path)
@@ -1056,8 +1078,11 @@ async function pargeChunks(){
     else{
         const indexes = await forageStorage.keys()
         for(const asset of indexes){
+            if(!asset.startsWith('assets/')){
+                continue
+            }
             const n = getBasename(asset)
-            if(unpargeable.includes(n) || (!asset.endsWith(".png"))){
+            if(unpargeable.includes(n)){
             }
             else{
                 await forageStorage.removeItem(asset)
