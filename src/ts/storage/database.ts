@@ -15,7 +15,7 @@ import type { OobaChatCompletionRequestParams } from '../model/ooba';
 
 export const DataBase = writable({} as any as Database)
 export const loadedStore = writable(false)
-export let appVer = "1.71.2"
+export let appVer = "1.73.2"
 export let webAppSubVer = ''
 
 export function setDatabase(data:Database){
@@ -367,10 +367,15 @@ export function setDatabase(data:Database){
         postEndInnerFormat: '',
         sendChatAsSystem: false,
         sendName: false,
-        utilOverride: false
+        utilOverride: false,
+        customChainOfThought: false,
+        maxThoughtTagDepth: -1
     }
     data.keiServerURL ??= ''
     data.top_k ??= 0
+    data.proomptSettings.maxThoughtTagDepth ??= -1
+    data.openrouterFallback ??= true
+    data.openrouterMiddleOut ??= false
 
     changeLanguage(data.language)
     DataBase.set(data)
@@ -525,6 +530,8 @@ export interface Database{
     personaPrompt:string
     openrouterRequestModel:string
     openrouterKey:string
+    openrouterMiddleOut:boolean
+    openrouterFallback:boolean
     selectedPersona:number
     personas:{
         personaPrompt:string
@@ -584,6 +591,7 @@ export interface Database{
         }
     },
     top_k:number
+    claudeAws:boolean
 }
 
 export interface customscript{

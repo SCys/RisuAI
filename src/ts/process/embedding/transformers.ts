@@ -1,12 +1,40 @@
 import {env, AutoTokenizer, pipeline, type SummarizationOutput, type TextGenerationConfig, type TextGenerationOutput, FeatureExtractionPipeline, TextToAudioPipeline } from '@xenova/transformers';
 import { unzip } from 'fflate';
-import { loadAsset, saveAsset } from 'src/ts/storage/globalApi';
+import { globalFetch, loadAsset, saveAsset } from 'src/ts/storage/globalApi';
 import { selectSingleFile } from 'src/ts/util';
 import { v4 } from 'uuid';
-
-env.localModelPath = "https://sv.risuai.xyz/transformers/"
+let tfCache:Cache = null
+let tfLoaded = false
+let tfMap:{[key:string]:string} = {}
+async function initTransformers(){
+    if(tfLoaded){
+        return
+    }
+    tfCache = await caches.open('tfCache')
+    env.localModelPath = "https://sv.risuai.xyz/transformers/"
+    env.useBrowserCache = false
+    env.useFSCache = false
+    env.useCustomCache = true
+    env.customCache = {
+        put: async (url:URL|string, response:Response) => {
+            await tfCache.put(url, response)
+        },
+        match: async (url:URL|string) => {
+            if(typeof url === 'string'){
+                if(Object.keys(tfMap).includes(url)){
+                    const assetId = tfMap[url]
+                    return new Response(await loadAsset(assetId))
+                }
+            }
+            return await tfCache.match(url)
+        }
+    }
+    tfLoaded = true
+    console.log('transformers loaded')
+}
 
 export const runTransformers = async (baseText:string, model:string,config:TextGenerationConfig = {}) => {
+    await initTransformers()
     let text = baseText
     let generator = await pipeline('text-generation', model);
     let output = await generator(text, config) as TextGenerationOutput
@@ -15,6 +43,7 @@ export const runTransformers = async (baseText:string, model:string,config:TextG
 }
 
 export const runSummarizer = async (text: string) => {
+    await initTransformers()
     let classifier = await pipeline("summarization", "Xenova/distilbart-cnn-6-6")
     const v = await classifier(text) as SummarizationOutput
     return v[0].summary_text
@@ -22,6 +51,7 @@ export const runSummarizer = async (text: string) => {
 
 let extractor:FeatureExtractionPipeline = null
 export const runEmbedding = async (text: string):Promise<Float32Array> => {
+    await initTransformers()
     if(!extractor){
         extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
     }
@@ -73,6 +103,7 @@ export interface OnnxModelFiles {
 }
 
 export const runVITS = async (text: string, modelData:string|OnnxModelFiles = 'Xenova/mms-tts-eng') => {
+    await initTransformers()
     const {WaveFile} = await import('wavefile')
     if(modelData === null){
         return
@@ -88,22 +119,9 @@ export const runVITS = async (text: string, modelData:string|OnnxModelFiles = 'X
             const files = modelData.files
             const keys = Object.keys(files)
             for(const key of keys){
-                const hasCache:boolean = (await (await fetch("/sw/check/", {
-                    headers: {
-                        'x-register-url': encodeURIComponent(key)
-                    }
-                })).json()).able
-    
-                if(!hasCache){
-                    await fetch("/sw/register/", {
-                        method: "POST",
-                        body: await loadAsset(files[key]),
-                        headers: {
-                            'x-register-url': encodeURIComponent(key),
-                            'x-no-content-type': 'true'
-                        }
-                    })
-                }
+                const fileURL = env.localModelPath + modelData.id + '/' + key
+                tfMap[fileURL] = files[key]
+                tfMap[location.origin + fileURL] = files[key]
             }
             lastSynth = modelData.id
             synthesizer = await pipeline('text-to-speech', modelData.id);
@@ -157,7 +175,6 @@ export const registerOnnxModel = async ():Promise<OnnxModelFiles> => {
         if(url.startsWith('/')){
             url = url.substring(1)
         }
-        url = '/transformers/' + id +'/' + url
         fileIdMapped[url] = fid
     }
 

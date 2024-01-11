@@ -18,9 +18,10 @@ import { Sha256 } from "@aws-crypto/sha256-js";
 import { v4 } from "uuid";
 import { cloneDeep } from "lodash";
 import { supportsInlayImage } from "../image";
-import { OaifixEmdash } from "../plugins/fixer";
+import { OaifixBias } from "../plugins/fixer";
 import { Capacitor } from "@capacitor/core";
 import { getFreeOpenRouterModel } from "../model/openrouter";
+import { runTransformers } from "./embedding/transformers";
 
 
 
@@ -242,10 +243,9 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
 
                 }
             }
-
-            if(db.officialplugins.oaiFix && db.officialplugins.oaiFixEmdash){
-                if(raiModel.startsWith('gpt35') || raiModel.startsWith('gpt4')){
-                    bias = OaifixEmdash(bias)
+            if(raiModel.startsWith('gpt')){
+                if(db.officialplugins.oaiFix){
+                    bias = OaifixBias(bias)
                 }
             }
 
@@ -432,6 +432,12 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
                     //@ts-ignore
                     body.top_k = db.top_k
                 }
+                if(db.openrouterFallback){
+                    //@ts-ignore
+                    body.route = "fallback"
+                }
+                //@ts-ignore
+                body.transforms = db.openrouterMiddleOut ? ['middle-out'] : []
             }
 
             if(aiModel === 'reverse_proxy' && db.reverseProxyOobaMode){
@@ -1421,27 +1427,23 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
                 }).join('') + '\n\nAssistant: '
 
 
-                //claude bedrock
-
-                //placeholders
-                const bedrock = false
-                const region = ''
-
-                const AMZ_HOST = "invoke-bedrock.%REGION%.amazonaws.com";
-                const host = AMZ_HOST.replace("%REGION%", region);
-
-                function getCredentialParts(key:string) {
-                    const [accessKeyId, secretAccessKey, region] = key.split(":");
-                  
-                    if (!accessKeyId || !secretAccessKey || !region) {
-                      throw new Error("The key assigned to this request is invalid.");
-                    }
-                  
-                    return { accessKeyId, secretAccessKey, region };
-                }
-
+                const bedrock = db.claudeAws
                   
                 if(bedrock){
+                    function getCredentialParts(key:string) {
+                        const [accessKeyId, secretAccessKey, region] = key.split(":");
+                      
+                        if (!accessKeyId || !secretAccessKey || !region) {
+                          throw new Error("The key assigned to this request is invalid.");
+                        }
+                      
+                        return { accessKeyId, secretAccessKey, region };
+                    }
+                    const { accessKeyId, secretAccessKey, region } = getCredentialParts(apiKey);
+
+                    const AMZ_HOST = "invoke-bedrock.%REGION%.amazonaws.com";
+                    const host = AMZ_HOST.replace("%REGION%", region);
+
                     const stream = false
                     const url = `https://${host}/model/${model}/invoke${stream ? "-with-response-stream" : ""}`
                     const params = {
@@ -1466,7 +1468,6 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
                     });                    
 
 
-                    const { accessKeyId, secretAccessKey, region } = getCredentialParts(apiKey);
                     const signer = new SignatureV4({
                         sha256: Sha256,
                         credentials: { accessKeyId, secretAccessKey },
@@ -1626,6 +1627,23 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
                 }
 
 
+            }
+            if(aiModel.startsWith('hf:::')){
+                const realModel = aiModel.split(":::")[1]
+                const suggesting = model === "submodel"
+                const proompt = stringlizeChatOba(formated, currentChar.name, suggesting, arg.continue)
+                const v = await runTransformers(proompt, realModel, {
+                    temperature: temperature,
+                    max_new_tokens: maxTokens,
+                    top_k: db.ooba.top_k,
+                    top_p: db.ooba.top_p,
+                    repetition_penalty: db.ooba.repetition_penalty,
+                    typical_p: db.ooba.typical_p,
+                })
+                return {
+                    type: 'success',
+                    result: unstringlizeChat(v.generated_text, formated, currentChar?.name ?? '')
+                }
             }
             if(aiModel.startsWith('local_')){
                 console.log('running local model')

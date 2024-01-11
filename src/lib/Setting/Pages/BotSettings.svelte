@@ -116,7 +116,13 @@
     </div>
 {/if}
 {#if $DataBase.aiModel.startsWith('palm2') || $DataBase.subModel.startsWith('palm2') || $DataBase.aiModel.startsWith('gemini') || $DataBase.subModel.startsWith('gemini')}
-    <span class="text-textcolor">Google Bearer Token</span>
+    <span class="text-textcolor">
+        {#if $DataBase.google.projectId === 'aigoogle'}
+            GoogleAI API Key
+        {:else}
+            Google Bearer Token
+        {/if}
+    </span>
     <TextInput marginBottom={true} size={"sm"} placeholder="..." bind:value={$DataBase.google.accessToken}/>
 
     {#if $DataBase.google.projectId !== 'aigoogle'}
@@ -144,6 +150,9 @@
 {#if $DataBase.aiModel.startsWith('claude') || $DataBase.subModel.startsWith('claude')}
     <span class="text-textcolor">Claude {language.apiKey}</span>
     <TextInput marginBottom={true} size={"sm"} placeholder="..." bind:value={$DataBase.claudeAPIKey}/>
+    {#if $DataBase.useExperimental}
+        <Check name="Claude Aws" bind:check={$DataBase.claudeAws}> <Help key="experimental" /></Check>
+    {/if}
 {/if}
 {#if $DataBase.aiModel.startsWith('mistral') || $DataBase.subModel.startsWith('mistral')}
     <span class="text-textcolor">Mistral {language.apiKey}</span>
@@ -227,6 +236,14 @@
 {#if $DataBase.aiModel.startsWith('gpt') || $DataBase.aiModel === 'reverse_proxy' || $DataBase.aiModel === 'openrouter'}
     <div class="flex items-center mt-2 mb-4">
         <Check bind:check={$DataBase.useStreaming} name={`Response ${language.streaming}`}/>
+    </div>
+{/if}
+{#if $DataBase.aiModel.startsWith('openrouter')}
+    <div class="flex items-center">
+        <Check bind:check={$DataBase.openrouterFallback} name={language.openrouterFallback}/>
+    </div>
+    <div class="flex items-center">
+        <Check bind:check={$DataBase.openrouterMiddleOut} name={language.openrouterMiddleOut}/>
     </div>
 {/if}
 
@@ -321,7 +338,7 @@
     <span class="text-textcolor2 mb-6 text-sm">{($DataBase.top_k).toFixed(0)}</span>
 {/if}
 
-{#if $DataBase.aiModel === 'textgen_webui' || $DataBase.aiModel === 'mancer' || $DataBase.aiModel.startsWith('local_')}
+{#if $DataBase.aiModel === 'textgen_webui' || $DataBase.aiModel === 'mancer' || $DataBase.aiModel.startsWith('local_') || $DataBase.aiModel.startsWith('hf:::')}
     <span class="text-textcolor">Repetition Penalty</span>
     <SliderInput min={1} max={1.5} step={0.01} bind:value={$DataBase.ooba.repetition_penalty}/>
     <span class="text-textcolor2 mb-6 text-sm">{($DataBase.ooba.repetition_penalty).toFixed(2)}</span>
