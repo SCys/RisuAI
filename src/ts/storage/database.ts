@@ -15,7 +15,7 @@ import type { OobaChatCompletionRequestParams } from '../model/ooba';
 
 export const DataBase = writable({} as any as Database)
 export const loadedStore = writable(false)
-export let appVer = "1.73.2"
+export let appVer = "1.76.3"
 export let webAppSubVer = ''
 
 export function setDatabase(data:Database){
@@ -288,24 +288,12 @@ export function setDatabase(data:Database){
     if(checkNullish(data.loreBookPage) || data.loreBook.length < data.loreBookPage){
         data.loreBookPage = 0
     }
-    if(checkNullish(data.globalscript)){
-        data.globalscript = []
-    }
-    if(checkNullish(data.sendWithEnter)){
-        data.sendWithEnter = true
-    }
-    if(checkNullish(data.autoSuggestPrompt)){
-        data.autoSuggestPrompt = defaultAutoSuggestPrompt
-    }
-    if(checkNullish(data.autoSuggestPrefix)){
-        data.autoSuggestPrefix = ""
-    }
-    if(checkNullish(data.autoSuggestClean)){
-        data.autoSuggestClean = true
-    }
-    if(checkNullish(data.imageCompression)){
-        data.imageCompression = true
-    }
+    data.globalscript ??= []
+    data.sendWithEnter ??= true
+    data.autoSuggestPrompt ??= defaultAutoSuggestPrompt
+    data.autoSuggestPrefix ??= ""
+    data.autoSuggestClean ??= true
+    data.imageCompression ??= true
     if(!data.formatingOrder.includes('personaPrompt')){
         data.formatingOrder.splice(data.formatingOrder.indexOf('main'),0,'personaPrompt')
     }
@@ -376,6 +364,7 @@ export function setDatabase(data:Database){
     data.proomptSettings.maxThoughtTagDepth ??= -1
     data.openrouterFallback ??= true
     data.openrouterMiddleOut ??= false
+    data.removePunctuationHypa ??= true
 
     changeLanguage(data.language)
     DataBase.set(data)
@@ -592,6 +581,8 @@ export interface Database{
     },
     top_k:number
     claudeAws:boolean
+    lastPatchNoteCheckVersion?:string,
+    removePunctuationHypa?:boolean
 }
 
 export interface customscript{

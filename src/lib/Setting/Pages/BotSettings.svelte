@@ -505,10 +505,10 @@
     <span class="text-textcolor2 mb-6 text-sm">{($DataBase.top_p).toFixed(2)}</span>
 
     <span class="text-textcolor">{language.frequencyPenalty} <Help key="frequencyPenalty"/></span>
-    <SliderInput min={0} max={100} bind:value={$DataBase.frequencyPenalty} />
+    <SliderInput min={0} max={200} bind:value={$DataBase.frequencyPenalty} />
     <span class="text-textcolor2 mb-6 text-sm">{($DataBase.frequencyPenalty / 100).toFixed(2)}</span>
     <span class="text-textcolor">{language.presensePenalty} <Help key="presensePenalty"/></span>
-    <SliderInput min={0} max={100} bind:value={$DataBase.PresensePenalty} />
+    <SliderInput min={0} max={200} bind:value={$DataBase.PresensePenalty} />
     <span class="text-textcolor2 mb-6 text-sm">{($DataBase.PresensePenalty / 100).toFixed(2)}</span>
 
     <span class="text-textcolor mt-2">{language.autoSuggest} <Help key="autoSuggest"/></span>

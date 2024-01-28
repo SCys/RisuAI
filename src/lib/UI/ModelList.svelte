@@ -5,6 +5,8 @@
     import { language } from "src/lang";
     import Help from "../Others/Help.svelte";
     import CheckInput from "./GUI/CheckInput.svelte";
+    import { isTauri } from "src/ts/storage/globalApi";
+    import {open} from '@tauri-apps/api/dialog'
 
     export let value = ""
     export let onChange: (v:string) => void = (v) => {}
@@ -89,6 +91,10 @@
                     const split = name.split(":::")
                     return `${split[1]}`
                 }
+                if(name.startsWith('local_')){
+                    const realName = name.replace('local_', '').split(/(\\|\/)/g).at(-1)
+                    return `GGUF ${realName}`
+                }
                 return name
         }
     }
@@ -116,13 +122,14 @@
                 <button class="p-2 hover:text-green-500" on:click={() => {changeModel('instructgpt35')}}>GPT-3.5 Instruct</button>
                 <button class="p-2 hover:text-green-500" on:click={() => {changeModel('gpt4')}}>GPT-4</button>
                 <button class="p-2 hover:text-green-500" on:click={() => {changeModel('gpt4_32k')}}>GPT-4 32K</button>
-                <button class="p-2 hover:text-green-500" on:click={() => {changeModel('gpt4_1106')}}>GPT-4 Turbo 1106</button>
+                <button class="p-2 hover:text-green-500" on:click={() => {changeModel('gpt4_0125')}}>GPT-4 Turbo 0125</button>
                 <button class="p-2 hover:text-green-500" on:click={() => {changeModel('gptvi4_1106')}}>GPT-4 Turbo 1106 Vision</button>
                 {#if showUnrec}
                     <button class="p-2 hover:text-green-500" on:click={() => {changeModel('gpt35_16k')}}>GPT-3.5 Turbo 16K</button>
                     <button class="p-2 hover:text-green-500" on:click={() => {changeModel('gpt4_0301')}}>GPT-4 0301</button>
                     <button class="p-2 hover:text-green-500" on:click={() => {changeModel('gpt4_0613')}}>GPT-4 0613</button>
                     <button class="p-2 hover:text-green-500" on:click={() => {changeModel('gpt4_32k_0613')}}>GPT-4 32K 0613</button>
+                    <button class="p-2 hover:text-green-500" on:click={() => {changeModel('gpt4_1106')}}>GPT-4 Turbo 1106</button>
                     <button class="p-2 hover:text-green-500" on:click={() => {changeModel('gpt35_1106')}}>GPT-3.5 Turbo 1106</button>
                     <button class="p-2 hover:text-green-500" on:click={() => {changeModel('gpt35_0613')}}>GPT-3.5 Turbo 0613</button>
                     <button class="p-2 hover:text-green-500" on:click={() => {changeModel('gpt35_16k_0613')}}>GPT-3.5 Turbo 16K 0613</button>
@@ -143,10 +150,18 @@
                 {/if}
             </Arcodion>
             <button class="hover:bg-selected px-6 py-2 text-lg" on:click={() => {changeModel('reverse_proxy')}}>Reverse Proxy</button>
-            {#if import.meta.env.DEV}
+            {#if $DataBase.tpo && isTauri}
                 <button class="hover:bg-selected px-6 py-2 text-lg" on:click={async () => {
-                    changeModel('local_gptq')
-                }}>Local Model GPTQ <Help key="experimental"/> </button>
+                    const selected = await open({
+                        filters: [{
+                            name: 'Model File',
+                            extensions: ['gguf']
+                        }]
+                    });
+                    if(selected){
+                        changeModel('local_' + selected)
+                    }
+                }}>Local GGUF Model <Help key="experimental"/> </button>
             {/if}
             <button class="hover:bg-selected px-6 py-2 text-lg" on:click={() => {changeModel('ooba')}}>Oobabooga</button>
             {#if showUnrec}

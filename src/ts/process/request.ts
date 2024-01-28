@@ -10,7 +10,7 @@ import { createDeep } from "./deepai";
 import { hubURL } from "../characterCards";
 import { NovelAIBadWordIds, stringlizeNAIChat } from "./models/nai";
 import { strongBan, tokenizeNum } from "../tokenizer";
-import { runLocalModel } from "./models/local";
+import { runGGUFModel } from "./models/local";
 import { risuChatParser } from "../parser";
 import { SignatureV4 } from "@smithy/signature-v4";
 import { HttpRequest } from "@smithy/protocol-http";
@@ -49,7 +49,7 @@ type requestDataResponse = {
     }
 }|{
     type: "streaming",
-    result: ReadableStream<string>,
+    result: ReadableStream<StreamResponseChunk>,
     special?: {
         emotion?: string
     }
@@ -60,6 +60,8 @@ type requestDataResponse = {
         emotion?: string
     }
 }
+
+interface StreamResponseChunk{[key:string]:string}
 
 interface OaiFunctions {
     name: string;
@@ -149,6 +151,7 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
         case 'gpt4_0613':
         case 'gpt4_32k_0613':
         case 'gpt4_1106':
+        case 'gpt4_0125':
         case 'gpt35_1106':
         case 'gpt35_0301':
         case 'gpt4_0301':
@@ -400,6 +403,7 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
                     : requestModel === "gpt4_0613" ? 'gpt-4-0613'
                     : requestModel === "gpt4_32k_0613" ? 'gpt-4-32k-0613'
                     : requestModel === "gpt4_1106" ? 'gpt-4-1106-preview'
+                    : requestModel === 'gpt4_0125' ? 'gpt-4-0125-preview'
                     : requestModel === "gptvi4_1106" ? 'gpt-4-vision-preview'
                     : requestModel === "gpt35_1106" ? 'gpt-3.5-turbo-1106'
                     : requestModel === 'gpt35_0301' ? 'gpt-3.5-turbo-0301'
@@ -503,7 +507,7 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
                 body.n = db.genTime
             }
             let throughProxi = (!isTauri) && (!isNodeServer) && (!db.usePlainFetch) && (!Capacitor.isNativePlatform())
-            if(db.useStreaming && arg.useStreaming && (!multiGen)){
+            if(db.useStreaming && arg.useStreaming){
                 body.stream = true
                 let urlHost = new URL(replacerURL).host
                 if(urlHost.includes("localhost") || urlHost.includes("172.0.0.1") || urlHost.includes("0.0.0.0")){
@@ -556,12 +560,12 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
 
                 let dataUint = new Uint8Array([])
 
-                const transtream = new TransformStream<Uint8Array, string>(  {
+                const transtream = new TransformStream<Uint8Array, StreamResponseChunk>(  {
                     async transform(chunk, control) {
                         dataUint = Buffer.from(new Uint8Array([...dataUint, ...chunk]))
                         try {
                             const datas = dataUint.toString().split('\n')
-                            let readed = ''
+                            let readed:{[key:string]:string} = {}
                             for(const data of datas){
                                 if(data.startsWith("data: ")){
                                     try {
@@ -570,9 +574,24 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
                                             control.enqueue(readed)
                                             return
                                         }
-                                        const chunk = JSON.parse(rawChunk).choices[0].delta.content
-                                        if(chunk){
-                                            readed += chunk
+                                        const choices = JSON.parse(rawChunk).choices
+                                        for(const choice of choices){
+                                            const chunk = choice.delta.content
+                                            if(chunk){
+                                                if(multiGen){
+                                                    const ind = choice.index.toString()
+                                                    if(!readed[ind]){
+                                                        readed[ind] = ""
+                                                    }
+                                                    readed[ind] += chunk
+                                                }
+                                                else{
+                                                    if(!readed["0"]){
+                                                        readed["0"] = ""
+                                                    }
+                                                    readed["0"] += chunk
+                                                }
+                                            }
                                         }
                                     } catch (error) {}
                                 }
@@ -1429,7 +1448,7 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
 
                 const bedrock = db.claudeAws
                   
-                if(bedrock){
+                if(bedrock && aiModel !== 'reverse_proxy'){
                     function getCredentialParts(key:string) {
                         const [accessKeyId, secretAccessKey, region] = key.split(":");
                       
@@ -1441,28 +1460,58 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
                     }
                     const { accessKeyId, secretAccessKey, region } = getCredentialParts(apiKey);
 
-                    const AMZ_HOST = "invoke-bedrock.%REGION%.amazonaws.com";
+                    const AMZ_HOST = "bedrock-runtime.%REGION%.amazonaws.com";
                     const host = AMZ_HOST.replace("%REGION%", region);
 
                     const stream = false
-                    const url = `https://${host}/model/${model}/invoke${stream ? "-with-response-stream" : ""}`
+
+                    const LATEST_AWS_V2_MINOR_VERSION = 1;
+                    let awsModel = `anthropic.claude-v2:${LATEST_AWS_V2_MINOR_VERSION}`;
+
+                    const pattern = /^(claude-)?(instant-)?(v)?(\d+)(\.(\d+))?(-\d+k)?$/i;
+                    const match = raiModel.match(pattern);
+                  
+                    if (match) {
+                        const [, , instant, v, major, dot, minor] = match;
+                    
+                        if (instant) {
+                            awsModel = "anthropic.claude-instant-v1";
+                        }
+                    
+                        // There's only one v1 model
+                        else if (major === "1") {
+                            awsModel = "anthropic.claude-v1";
+                        }
+                    
+                        // Try to map Anthropic API v2 models to AWS v2 models
+                        else if (major === "2") {
+                            if (minor === "0") {
+                                awsModel = "anthropic.claude-v2";
+                            } else if (!v && !dot && !minor) {
+                                awsModel = "anthropic.claude-v2";
+                            } 
+                        }                    
+                    }
+
+                    const url = `https://${host}/model/${awsModel}/invoke${stream ? "-with-response-stream" : ""}`
                     const params = {
-                        prompt : "\n\nHuman: " + requestPrompt,
-                        model: raiModel,
+                        prompt : requestPrompt.startsWith("\n\nHuman: ") ? requestPrompt : "\n\nHuman: " + requestPrompt,
+                        //model: raiModel,
                         max_tokens_to_sample: maxTokens,
                         stop_sequences: ["\n\nHuman:", "\n\nSystem:", "\n\nAssistant:"],
                         temperature: temperature,
+                        top_p: db.top_p,
                     }
                     const rq = new HttpRequest({
                         method: "POST",
                         protocol: "https:",
                         hostname: host,
-                        path: `/model/${model}/invoke${stream ? "-with-response-stream" : ""}`,
+                        path: `/model/${awsModel}/invoke${stream ? "-with-response-stream" : ""}`,
                         headers: {
                           ["Host"]: host,
-                          ["content-type"]: "application/json",
+                          ["Content-Type"]: "application/json",
                           ["accept"]: "application/json",
-                          "anthropic-version": "2023-06-01",
+                          //"anthropic-version": "2023-06-01",
                         },
                         body: JSON.stringify(params),
                     });                    
@@ -1477,15 +1526,11 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
 
                     const signed = await signer.sign(rq);
 
-                    const da = await globalFetch(`${signed.protocol}//${signed.hostname}`, {
+                    const da = await globalFetch(url, {
                         method: "POST",
                         body: params,
-                        headers: {
-                            ["Host"]: host,
-                            ["content-type"]: "application/json",
-                            ["accept"]: "application/json",
-                            "anthropic-version": "2023-06-01",
-                        }
+                        headers: signed.headers,
+                        plainFetchForce: true
                     })
 
                       
@@ -1650,7 +1695,37 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
                 const suggesting = model === "submodel"
                 const proompt = stringlizeChatOba(formated, currentChar.name, suggesting, arg.continue)
                 const stopStrings = getStopStrings(suggesting)
-                await runLocalModel(proompt)
+                console.log(stopStrings)
+                const modelPath = aiModel.replace('local_', '')
+                const res = await runGGUFModel({
+                    prompt: proompt,
+                    modelPath: modelPath,
+                    temperature: temperature,
+                    top_p: db.top_p,
+                    top_k: db.top_k,
+                    maxTokens: maxTokens,
+                    presencePenalty: arg.PresensePenalty || (db.PresensePenalty / 100),
+                    frequencyPenalty: arg.frequencyPenalty || (db.frequencyPenalty / 100),
+                    repeatPenalty: 0,
+                    maxContext: db.maxContext,
+                    stop: stopStrings,
+                })
+                let decoded = ''
+                const transtream = new TransformStream<Uint8Array, StreamResponseChunk>({
+                    async transform(chunk, control) {
+                        const decodedChunk = new TextDecoder().decode(chunk)
+                        decoded += decodedChunk
+                        control.enqueue({
+                            "0": decoded
+                        })
+                    }
+                })
+                res.pipeTo(transtream.writable)
+
+                return {
+                    type: 'streaming',
+                    result: transtream.readable
+                }
             }
             return {
                 type: 'fail',

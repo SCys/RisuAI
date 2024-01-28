@@ -222,10 +222,10 @@ export async function sendChat(chatProcessIndex = -1,arg:{chatAdditonalTokens?:n
 
 
         function formatPrompt(data:string){
-            if(!data.startsWith('@@@')){
-                data = "@@@system\n" + data
+            if(!data.startsWith('@@')){
+                data = "@@system\n" + data
             }
-            const parts = data.split(/@@@(user|assistant|system)\n/);
+            const parts = data.split(/@@@?(user|assistant|system)\n/);
   
             // Initialize empty array for the chat objects
             const chatObjects: OpenAIChat[] = [];
@@ -893,7 +893,7 @@ export async function sendChat(chatProcessIndex = -1,arg:{chatAdditonalTokens?:n
             let pointer = 0
             while(tokens > maxContextTokens){
                 if(pointer >= formated.length){
-                    alertError(language.errors.toomuchtoken + "\n\nRequired Tokens: " + tokens)
+                    alertError(language.errors.toomuchtoken + "\n\nAt token rechecking. Required Tokens: " + tokens)
                     return false
                 }
                 if(formated[pointer].removable){
@@ -951,10 +951,16 @@ export async function sendChat(chatProcessIndex = -1,arg:{chatAdditonalTokens?:n
             })
         }
         db.characters[selectedChar].chats[selectedChat].isStreaming = true
+        let lastResponseChunk:{[key:string]:string} = {}
         while(abortSignal.aborted === false){
             const readed = (await reader.read())
             if(readed.value){
-                result = readed.value
+                lastResponseChunk = readed.value
+                const firstChunkKey = Object.keys(lastResponseChunk)[0]
+                result = lastResponseChunk[firstChunkKey]
+                if(!result){
+                    result = ''
+                }
                 if(db.cipherChat){
                     result = decipherChat(result)
                 }
@@ -971,6 +977,9 @@ export async function sendChat(chatProcessIndex = -1,arg:{chatAdditonalTokens?:n
                 break
             }   
         }
+
+        console.log(lastResponseChunk)
+        addRerolls(generationId, Object.values(lastResponseChunk))
 
         currentChat = db.characters[selectedChar].chats[selectedChat]        
         const triggerResult = await runTrigger(currentChar, 'output', {chat:currentChat})
