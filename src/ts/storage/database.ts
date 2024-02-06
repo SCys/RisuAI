@@ -15,7 +15,7 @@ import type { OobaChatCompletionRequestParams } from '../model/ooba';
 
 export const DataBase = writable({} as any as Database)
 export const loadedStore = writable(false)
-export let appVer = "1.77.0"
+export let appVer = "1.78.0"
 export let webAppSubVer = ''
 
 export function setDatabase(data:Database){
@@ -366,6 +366,8 @@ export function setDatabase(data:Database){
     data.openrouterMiddleOut ??= false
     data.removePunctuationHypa ??= true
     data.memoryLimitThickness ??= 1
+    data.modules ??= []
+    data.enabledModules ??= []
 
     changeLanguage(data.language)
     DataBase.set(data)
@@ -527,6 +529,7 @@ export interface Database{
         personaPrompt:string
         name:string
         icon:string
+        largePortrait?:boolean
     }[]
     assetWidth:number
     animationSpeed:number
@@ -585,6 +588,8 @@ export interface Database{
     lastPatchNoteCheckVersion?:string,
     removePunctuationHypa?:boolean
     memoryLimitThickness?:number
+    modules: RisuModule[]
+    enabledModules: string[]
 }
 
 export interface customscript{
@@ -837,6 +842,7 @@ export interface Chat{
     suggestMessages?:string[]
     isStreaming?:boolean
     scriptstate?:{[key:string]:string|number|boolean}
+    modules?:string[]
 }
 
 export interface Message{
@@ -1118,6 +1124,7 @@ export function setPreset(db:Database, newPres: botPreset){
 import { encode as encodeMsgpack, decode as decodeMsgpack } from "msgpackr";
 import * as fflate from "fflate";
 import type { OnnxModelFiles } from '../process/embedding/transformers';
+import type { RisuModule } from '../process/modules';
 
 export async function downloadPreset(id:number){
     saveCurrentPreset()
