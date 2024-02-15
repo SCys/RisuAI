@@ -15,7 +15,7 @@ import type { OobaChatCompletionRequestParams } from '../model/ooba';
 
 export const DataBase = writable({} as any as Database)
 export const loadedStore = writable(false)
-export let appVer = "1.78.4"
+export let appVer = "1.78.5"
 export let webAppSubVer = ''
 
 export function setDatabase(data:Database){
@@ -302,7 +302,8 @@ export function setDatabase(data:Database){
     data.personas ??= [{
         name: data.username,
         personaPrompt: "",
-        icon: data.userIcon
+        icon: data.userIcon,
+        largePortrait: false
     }]
     data.classicMaxWidth ??= false
     data.ooba ??= cloneDeep(defaultOoba)
