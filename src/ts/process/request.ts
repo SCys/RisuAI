@@ -1,10 +1,10 @@
 import { get } from "svelte/store";
-import type { OpenAIChat, OpenAIChatFull } from ".";
+import type { MultiModal, OpenAIChat, OpenAIChatFull } from ".";
 import { DataBase, setDatabase, type character } from "../storage/database";
 import { pluginProcess } from "../plugins/plugins";
 import { language } from "../../lang";
 import { stringlizeAINChat, stringlizeChat, stringlizeChatOba, getStopStrings, unstringlizeAIN, unstringlizeChat } from "./stringlize";
-import { addFetchLog, globalFetch, isNodeServer, isTauri } from "../storage/globalApi";
+import { addFetchLog, fetchNative, globalFetch, isNodeServer, isTauri, textifyReadableStream } from "../storage/globalApi";
 import { sleep } from "../util";
 import { createDeep } from "./deepai";
 import { hubURL } from "../characterCards";
@@ -21,7 +21,8 @@ import { supportsInlayImage } from "./files/image";
 import { OaifixBias } from "../plugins/fixer";
 import { Capacitor } from "@capacitor/core";
 import { getFreeOpenRouterModel } from "../model/openrouter";
-import { runTransformers } from "./embedding/transformers";
+import { runTransformers } from "./transformers";
+import {createParser, type ParsedEvent, type ReconnectInterval} from 'eventsource-parser'
 
 
 
@@ -116,6 +117,7 @@ export interface OpenAIChatExtra {
     name?:string
     removable?:boolean
     attr?:string[]
+    multimodals?:MultiModal[]
 }
 
 
@@ -126,12 +128,16 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
     let temperature = arg.temperature ?? (db.temperature / 100)
     let bias = arg.bias
     let currentChar = arg.currentChar
+    let useStreaming = db.useStreaming && arg.useStreaming
     arg.continue = arg.continue ?? false
     let biasString = arg.biasString ?? []
     const aiModel = (model === 'model' || (!db.advancedBotSettings)) ? db.aiModel : db.subModel
 
     let raiModel = aiModel
     if(aiModel === 'reverse_proxy'){
+        if(db.proxyRequestModel === 'custom' && db.customProxyRequestModel.startsWith('claude')){
+            raiModel = db.customProxyRequestModel
+        }
         if(db.proxyRequestModel.startsWith('claude')){
             raiModel = db.proxyRequestModel
         }
@@ -161,41 +167,35 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
         case 'mistral-tiny':
         case 'mistral-small':
         case 'mistral-medium':
+        case 'mistral-small-latest':
+        case 'mistral-medium-latest':
+        case 'mistral-large-latest':
         case 'reverse_proxy':{
             let formatedChat:OpenAIChatExtra[] = []
-            if(db.inlayImage){
-                let pendingImages:OpenAIImageContents[] = []
-                for(let i=0;i<formated.length;i++){
-                    const m = formated[i]
-                    if(m.memo && m.memo.startsWith('inlayImage')){
-                        pendingImages.push({
+            for(let i=0;i<formated.length;i++){
+                const m = formated[i]
+                if(m.multimodals && m.multimodals.length > 0 && m.role === 'user'){
+                    let v:OpenAIChatExtra = cloneDeep(m)
+                    let contents:OpenAIContents[] = []
+                    for(let j=0;j<m.multimodals.length;j++){
+                        contents.push({
                             "type": "image",
                             "image_url": {
-                                "url": m.content,
+                                "url": m.multimodals[j].base64,
                                 "detail": db.gptVisionQuality
                             }
                         })
                     }
-                    else{
-                        if(pendingImages.length > 0 && m.role === 'user'){
-                            let v:OpenAIChatExtra = cloneDeep(m)
-                            let contents:OpenAIContents[] = pendingImages
-                            contents.push({
-                                "type": "text",
-                                "text": m.content
-                            })
-                            v.content = contents
-                            formatedChat.push(v)
-                            pendingImages = []
-                        }
-                        else{
-                            formatedChat.push(m)
-                        }
-                    }
+                    contents.push({
+                        "type": "text",
+                        "text": m.content
+                    })
+                    v.content = contents
+                    formatedChat.push(v)
                 }
-            }
-            else{
-                formatedChat = formated
+                else{
+                    formatedChat.push(m)
+                }
             }
             
             let oobaSystemPrompts:string[] = []
@@ -210,6 +210,7 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
                     delete formatedChat[i].memo
                     delete formatedChat[i].removable
                     delete formatedChat[i].attr
+                    delete formatedChat[i].multimodals
                 }
                 if(aiModel === 'reverse_proxy' && db.reverseProxyOobaMode && formatedChat[i].role === 'system'){
                     const cont = formatedChat[i].content
@@ -293,6 +294,7 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
                 openrouterRequestModel = await getFreeOpenRouterModel()
             }
 
+            console.log(formatedChat)
             if(aiModel.startsWith('mistral')){
                 requestModel = aiModel
 
@@ -509,7 +511,7 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
                 body.n = db.genTime
             }
             let throughProxi = (!isTauri) && (!isNodeServer) && (!db.usePlainFetch) && (!Capacitor.isNativePlatform())
-            if(db.useStreaming && arg.useStreaming){
+            if(useStreaming){
                 body.stream = true
                 let urlHost = new URL(replacerURL).host
                 if(urlHost.includes("localhost") || urlHost.includes("172.0.0.1") || urlHost.includes("0.0.0.0")){
@@ -520,36 +522,24 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
                         }
                     }
                 }
-                const da =  (throughProxi)
-                    ? await fetch(hubURL + `/proxy2`, {
-                        body: JSON.stringify(body),
-                        headers: {
-                            "risu-header": encodeURIComponent(JSON.stringify(headers)),
-                            "risu-url": encodeURIComponent(replacerURL),
-                            "Content-Type": "application/json",
-                            "x-risu-tk": "use"
-                        },
-                        method: "POST",
-                        signal: abortSignal
-                    })
-                    : await fetch(replacerURL, {
-                        body: JSON.stringify(body),
-                        method: "POST",
-                        headers: headers,
-                        signal: abortSignal
-                    })  
+                const da = await fetchNative(replacerURL, {
+                    body: JSON.stringify(body),
+                    method: "POST",
+                    headers: headers,
+                    signal: abortSignal
+                })
 
                 if(da.status !== 200){
                     return {
                         type: "fail",
-                        result: await da.text()
+                        result: await textifyReadableStream(da.body)
                     }
                 }
 
                 if (!da.headers.get('Content-Type').includes('text/event-stream')){
                     return {
                         type: "fail",
-                        result: await da.text()
+                        result: await textifyReadableStream(da.body)
                     }
                 }
 
@@ -842,7 +832,7 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
                 'X-API-KEY': db.mancerHeader
             }
 
-            if(db.useStreaming && arg.useStreaming){
+            if(useStreaming){
                 const oobaboogaSocket = new WebSocket(streamUrl);
                 const statusCode = await new Promise((resolve) => {
                     oobaboogaSocket.onopen = () => resolve(0)
@@ -1398,7 +1388,384 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
             }
         }
         default:{     
-            if(raiModel.startsWith('claude')){
+            if(raiModel.startsWith('claude-3')){
+                let replacerURL = (aiModel === 'reverse_proxy') ? (db.forceReplaceUrl) : ('https://api.anthropic.com/v1/messages')
+                let apiKey = (aiModel === 'reverse_proxy') ?  db.proxyKey : db.claudeAPIKey
+                if(aiModel === 'reverse_proxy' && db.autofillRequestUrl){
+                    if(replacerURL.endsWith('v1')){
+                        replacerURL += '/messages'
+                    }
+                    else if(replacerURL.endsWith('v1/')){
+                        replacerURL += 'messages'
+                    }
+                    else if(!(replacerURL.endsWith('messages') || replacerURL.endsWith('messages/'))){
+                        if(replacerURL.endsWith('/')){
+                            replacerURL += 'v1/messages'
+                        }
+                        else{
+                            replacerURL += '/v1/messages'
+                        }
+                    }
+                }
+
+                interface Claude3TextBlock {
+                    type: 'text',
+                    text: string
+                }
+
+                interface Claude3ImageBlock {
+                    type: 'image',
+                    source: {
+                        type: 'base64'
+                        media_type: string,
+                        data: string
+                    }
+                }
+
+                type Claude3ContentBlock = Claude3TextBlock|Claude3ImageBlock
+
+                interface Claude3Chat {
+                    role: 'user'|'assistant'
+                    content: string|Claude3ContentBlock[]
+                }
+
+                let claudeChat: Claude3Chat[] = []
+                let systemPrompt:string = ''
+
+                const addClaudeChat = (chat:{
+                    role: 'user'|'assistant'
+                    content: string
+                }, multimodals?:MultiModal[]) => {
+                    if(claudeChat.length > 0 && claudeChat[claudeChat.length-1].role === chat.role){
+                        let content = claudeChat[claudeChat.length-1].content
+                        if(multimodals && multimodals.length > 0 && !Array.isArray(content)){
+                            content = [{
+                                type: 'text',
+                                text: content
+                            }]
+                        }
+
+                        if(Array.isArray(content)){
+                            let lastContent = content[content.length-1]
+                            if( lastContent?.type === 'text'){
+                                lastContent.text += "\n\n" + chat.content
+                                content[content.length-1] = lastContent
+                            }
+                            else{
+                                content.push({
+                                    type: 'text',
+                                    text: chat.content
+                                })
+                            }
+
+                            if(multimodals && multimodals.length > 0){
+                                for(const modal of multimodals){
+                                    if(modal.type === 'image'){
+                                        const dataurl = modal.base64
+                                        const base64 = dataurl.split(',')[1]
+                                        const mediaType = dataurl.split(';')[0].split(':')[1]
+    
+                                        content.unshift({
+                                            type: 'image',
+                                            source: {
+                                                type: 'base64',
+                                                media_type: mediaType,
+                                                data: base64
+                                            }
+                                        })
+                                    }
+                                }
+                            }
+                        }
+                        else{
+                            content += "\n\n" + chat.content
+                        }
+                        claudeChat[claudeChat.length-1].content = content
+                    }
+                    else{
+                        let formatedChat:Claude3Chat = chat
+                        if(multimodals && multimodals.length > 0){
+                            formatedChat.content = [{
+                                type: 'text',
+                                text: chat.content
+                            }]
+                            for(const modal of multimodals){
+                                if(modal.type === 'image'){
+                                    const dataurl = modal.base64
+                                    const base64 = dataurl.split(',')[1]
+                                    const mediaType = dataurl.split(';')[0].split(':')[1]
+
+                                    formatedChat.content.unshift({
+                                        type: 'image',
+                                        source: {
+                                            type: 'base64',
+                                            media_type: mediaType,
+                                            data: base64
+                                        }
+                                    })
+                                }
+                            }
+
+                        }
+                        claudeChat.push(formatedChat)
+                    }
+                }
+                for(const chat of formated){
+                    switch(chat.role){
+                        case 'user':{
+                            addClaudeChat({
+                                role: 'user',
+                                content: chat.content
+                            }, chat.multimodals)
+                            break
+                        }
+                        case 'assistant':{
+                            addClaudeChat({
+                                role: 'assistant',
+                                content: chat.content
+                            }, chat.multimodals)
+                            break
+                        }
+                        case 'system':{
+                            if(claudeChat.length === 0){
+                                systemPrompt += '\n\n' + chat.content
+                            }
+                            else{
+                                addClaudeChat({
+                                    role: 'user',
+                                    content: "System: " + chat.content
+                                })
+                            }
+                            break
+                        }
+                        case 'function':{
+                            //ignore function for now
+                            break
+                        }
+                    }
+                }
+                console.log(claudeChat)
+                if(claudeChat.length === 0 && systemPrompt === ''){
+                    return {
+                        type: 'fail',
+                        result: 'No input'
+                    }
+                }
+                if(claudeChat.length === 0 && systemPrompt !== ''){
+                    claudeChat.push({
+                        role: 'user',
+                        content: systemPrompt
+                    })
+                    systemPrompt = ''
+                }
+                if(claudeChat[0].role !== 'user'){
+                    claudeChat.unshift({
+                        role: 'user',
+                        content: 'Start'
+                    })
+                }
+                let body = {
+                    model: raiModel,
+                    messages: claudeChat,
+                    system: systemPrompt.trim(),
+                    max_tokens: maxTokens,
+                    temperature: temperature,
+                    top_p: db.top_p,
+                    top_k: db.top_k,
+                    stream: useStreaming ?? false
+                }
+
+                if(systemPrompt === ''){
+                    delete body.system
+                }
+
+                const bedrock = db.claudeAws
+
+                if(bedrock && aiModel !== 'reverse_proxy'){
+                    function getCredentialParts(key:string) {
+                        const [accessKeyId, secretAccessKey, region] = key.split(":");
+                      
+                        if (!accessKeyId || !secretAccessKey || !region) {
+                          throw new Error("The key assigned to this request is invalid.");
+                        }
+                      
+                        return { accessKeyId, secretAccessKey, region };
+                    }
+                    const { accessKeyId, secretAccessKey, region } = getCredentialParts(apiKey);
+
+                    const AMZ_HOST = "bedrock-runtime.%REGION%.amazonaws.com";
+                    const host = AMZ_HOST.replace("%REGION%", region);
+                    const stream = false;   // todo?
+                    
+                    // https://docs.aws.amazon.com/bedrock/latest/userguide/model-ids.html
+                    const modelIDs = [
+                      "anthropic.claude-v2",
+                      "anthropic.claude-v2:1",
+                      "anthropic.claude-3-haiku-20240307-v1:0",
+                      "anthropic.claude-3-sonnet-20240229-v1:0",
+                    ];
+                    
+                    const awsModel = raiModel.includes("haiku") ? modelIDs[2] : modelIDs[3];
+                    const url = `https://${host}/model/${awsModel}/invoke${stream ? "-with-response-stream" : ""}`
+
+                    const params = {
+                        messages : claudeChat,
+                        system: systemPrompt.trim(),
+                        max_tokens: maxTokens,
+                        // stop_sequences: null,
+                        temperature: temperature,
+                        top_p: db.top_p,
+                        top_k: db.top_k,
+                        anthropic_version: "bedrock-2023-05-31",
+                    }
+
+                    const rq = new HttpRequest({
+                        method: "POST",
+                        protocol: "https:",
+                        hostname: host,
+                        path: `/model/${awsModel}/invoke${stream ? "-with-response-stream" : ""}`,
+                        headers: {
+                          ["Host"]: host,
+                          ["Content-Type"]: "application/json",
+                          ["accept"]: "application/json",
+                        },
+                        body: JSON.stringify(params),
+                    });
+                    
+                    const signer = new SignatureV4({
+                        sha256: Sha256,
+                        credentials: { accessKeyId, secretAccessKey },
+                        region,
+                        service: "bedrock",
+                    });
+                    
+                    const signed = await signer.sign(rq);
+
+                    const res = await globalFetch(url, {
+                        method: "POST",
+                        body: params,
+                        headers: signed.headers,
+                        plainFetchForce: true
+                    })
+
+                    if(!res.ok){
+                        return {
+                            type: 'fail',
+                            result: JSON.stringify(res.data)
+                        }
+                    }
+                    if(res.data.error){
+                        return {
+                            type: 'fail',
+                            result: JSON.stringify(res.data.error)
+                        }
+                    }
+                    return {
+                        type: 'success',
+                        result: res.data.content[0].text
+                    
+                    }
+                }
+
+                if(useStreaming){
+                    
+                    const res = await fetchNative(replacerURL, {
+                        body: JSON.stringify(body),
+                        headers: {
+                            "Content-Type": "application/json",
+                            "x-api-key": apiKey,
+                            "anthropic-version": "2023-06-01",
+                            "accept": "application/json",
+                        },
+                        method: "POST"
+                    })
+
+                    if(res.status !== 200){
+                        return {
+                            type: 'fail',
+                            result: await textifyReadableStream(res.body)
+                        }
+                    }
+
+
+                    const stream = new ReadableStream<StreamResponseChunk>({
+                        async start(controller){
+                            let text = ''
+                            const decoder = new TextDecoder()
+                            const parser = createParser((e) => {
+                                if(e.type === 'event'){
+                                    switch(e.event){
+                                        case 'content_block_delta': {
+                                            if(e.data){
+                                                text += JSON.parse(e.data).delta?.text
+                                                controller.enqueue({
+                                                    "0": text
+                                                })
+                                            }
+                                            break
+                                        }
+                                        case 'error': {
+                                            if(e.data){
+                                                text += "Error:" + JSON.parse(e.data).error?.message
+                                                controller.enqueue({
+                                                    "0": text
+                                                })
+                                            }
+                                            break
+                                        }
+                                    }
+                                }
+                            })
+                            const reader = res.body.getReader()
+                            while(true){
+                                const {done, value} = await reader.read()
+                                if(done){
+                                    break
+                                }
+                                parser.feed(decoder.decode(value))
+                            }
+                            controller.close()
+                        },
+                        cancel(){
+                        }
+                    })
+
+                    return {
+                        type: 'streaming',
+                        result: stream
+                    }
+
+                }
+                const res = await globalFetch(replacerURL, {
+                    body: body,
+                    headers: {
+                        "Content-Type": "application/json",
+                        "x-api-key": apiKey,
+                        "anthropic-version": "2023-06-01",
+                        "accept": "application/json"
+                    },
+                    method: "POST"
+                })
+
+                if(!res.ok){
+                    return {
+                        type: 'fail',
+                        result: JSON.stringify(res.data)
+                    }
+                }
+                if(res.data.error){
+                    return {
+                        type: 'fail',
+                        result: JSON.stringify(res.data.error)
+                    }
+                }
+                return {
+                    type: 'success',
+                    result: res.data.content[0].text
+                
+                }
+            }
+            else if(raiModel.startsWith('claude')){
 
                 let replacerURL = (aiModel === 'reverse_proxy') ? (db.forceReplaceUrl) : ('https://api.anthropic.com/v1/complete')
                 let apiKey = (aiModel === 'reverse_proxy') ?  db.proxyKey : db.claudeAPIKey
@@ -1505,11 +1872,11 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
                     const url = `https://${host}/model/${awsModel}/invoke${stream ? "-with-response-stream" : ""}`
                     const params = {
                         prompt : requestPrompt.startsWith("\n\nHuman: ") ? requestPrompt : "\n\nHuman: " + requestPrompt,
-                        //model: raiModel,
                         max_tokens_to_sample: maxTokens,
                         stop_sequences: ["\n\nHuman:", "\n\nSystem:", "\n\nAssistant:"],
                         temperature: temperature,
                         top_p: db.top_p,
+                        //top_k: db.top_k,
                     }
                     const rq = new HttpRequest({
                         method: "POST",

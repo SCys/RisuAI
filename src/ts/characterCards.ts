@@ -12,7 +12,7 @@ import { convertImage, hasher } from "./parser"
 
 import { reencodeImage } from "./process/files/image"
 import { PngChunk } from "./pngChunk"
-import type { OnnxModelFiles } from "./process/embedding/transformers"
+import type { OnnxModelFiles } from "./process/transformers"
 
 export const hubURL = "https://sv.risuai.xyz"
 
@@ -104,9 +104,7 @@ async function importCharacterProcess(f:{
                 alertError(language.errors.noData)
                 return
             }
-            console.log(parts[4])
             const metaData:RccCardMetaData = JSON.parse(Buffer.from(parts[4], 'base64').toString('utf-8'))
-            console.log(metaData)
             if(metaData.usePassword){
                 const password = await alertInput(language.inputCardPassword)
                 if(!password){
@@ -813,7 +811,6 @@ export async function getRisuHub(arg:{
         if(da.status !== 200){
             return []
         }
-        console.log(da)
         return da.json()   
     } catch (error) {
         return[]

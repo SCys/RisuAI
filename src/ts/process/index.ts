@@ -25,6 +25,7 @@ import { sendPeerChar } from "../sync/multiuser";
 import { runInlayScreen } from "./inlayScreen";
 import { runCharacterJS } from "../plugins/embedscript";
 import { addRerolls } from "./prereroll";
+import { runImageEmbedding } from "./transformers";
 
 export interface OpenAIChat{
     role: 'system'|'user'|'assistant'|'function'
@@ -33,6 +34,14 @@ export interface OpenAIChat{
     name?:string
     removable?:boolean
     attr?:string[]
+    multimodals?: MultiModal[]
+}
+
+export interface MultiModal{
+    type:'image'|'video'
+    base64:string,
+    height?:number,
+    width?:number
 }
 
 export interface OpenAIChatFull extends OpenAIChat{
@@ -182,9 +191,19 @@ export async function sendChat(chatProcessIndex = -1,arg:{chatAdditonalTokens?:n
     let promptTemplate = cloneDeep(db.promptTemplate)
     const usingPromptTemplate = !!promptTemplate
     if(promptTemplate){
-        promptTemplate.push({
-            type: 'postEverything'
-        })
+        let hasPostEverything = false
+        for(const card of promptTemplate){
+            if(card.type === 'postEverything'){
+                hasPostEverything = true
+                break
+            }
+        }
+
+        if(!hasPostEverything){
+            promptTemplate.push({
+                type: 'postEverything'
+            })
+        }
     }
     if(currentChar.utilityBot && (!(usingPromptTemplate && db.proomptSettings.utilOverride))){
         promptTemplate = [
@@ -421,13 +440,13 @@ export async function sendChat(chatProcessIndex = -1,arg:{chatAdditonalTokens?:n
                     let content = card.text
 
                     if(card.type2 === 'globalNote'){
-                        content = (risuChatParser(currentChar.replaceGlobalNote?.replaceAll('{{original}}', content) || content, {chara:currentChar}))
+                        content = (risuChatParser(currentChar.replaceGlobalNote?.replaceAll('{{original}}', content) || content, {chara: currentChar, role: card.role}))
                     }
                     else if(card.type2 === 'main'){
-                        content = (risuChatParser(content, {chara: currentChar}))
+                        content = (risuChatParser(content, {chara: currentChar, role: card.role}))
                     }
                     else{
-                        content = risuChatParser(content, {chara: currentChar})
+                        content = risuChatParser(content, {chara: currentChar, role: card.role})
                     }
 
                     const prompt:OpenAIChat ={
@@ -527,7 +546,7 @@ export async function sendChat(chatProcessIndex = -1,arg:{chatAdditonalTokens?:n
 
     let index = 0
     for(const msg of ms){
-        let formatedChat = await processScript(nowChatroom,risuChatParser(msg.data, {chara: currentChar, rmVar: true}), 'editprocess')
+        let formatedChat = await processScript(nowChatroom,risuChatParser(msg.data, {chara: currentChar, rmVar: true, role: msg.role}), 'editprocess')
         let name = ''
         if(msg.role === 'char'){
             if(msg.saying){
@@ -544,33 +563,35 @@ export async function sendChat(chatProcessIndex = -1,arg:{chatAdditonalTokens?:n
             msg.chatId = v4()
         }
         let inlays:string[] = []
-        if(db.inlayImage){
-            if(msg.role === 'char'){
-                formatedChat = formatedChat.replace(/{{inlay::(.+?)}}/g, '')
-            }
-            else{
-                const inlayMatch = formatedChat.match(/{{inlay::(.+?)}}/g)
-                if(inlayMatch){
-                    for(const inlay of inlayMatch){
-                        inlays.push(inlay)
-                    }
+        if(msg.role === 'char'){
+            formatedChat = formatedChat.replace(/{{inlay::(.+?)}}/g, '')
+        }
+        else{
+            const inlayMatch = formatedChat.match(/{{inlay::(.+?)}}/g)
+            if(inlayMatch){
+                for(const inlay of inlayMatch){
+                    inlays.push(inlay)
                 }
             }
         }
 
+        let multimodal:MultiModal[] = []
         if(inlays.length > 0){
             for(const inlay of inlays){
                 const inlayName = inlay.replace('{{inlay::', '').replace('}}', '')
                 const inlayData = await getInlayImage(inlayName)
                 if(inlayData){
                     if(supportsInlayImage()){
-                        const imgchat = {
-                            role: msg.role === 'user' ? 'user' : 'assistant',
-                            content: inlayData.data,
-                            memo: `inlayImage-${inlayData.height}-${inlayData.width}`,
-                        } as const
-                        chats.push(imgchat)
-                        currentTokens += await tokenizer.tokenizeChat(imgchat)
+                        multimodal.push({
+                            type: 'image',
+                            base64: inlayData.data,
+                            width: inlayData.width,
+                            height: inlayData.height
+                        })
+                    }
+                    else{
+                        const captionResult = await runImageEmbedding(inlayData.data) 
+                        formatedChat += `[${captionResult[0].generated_text}]`
                     }
                 }
                 formatedChat = formatedChat.replace(inlay, '')
@@ -594,7 +615,11 @@ export async function sendChat(chatProcessIndex = -1,arg:{chatAdditonalTokens?:n
             role: msg.role === 'user' ? 'user' : 'assistant',
             content: formatedChat,
             memo: msg.chatId,
-            attr: attr
+            attr: attr,
+            multimodals: multimodal
+        }
+        if(chat.multimodals.length === 0){
+            delete chat.multimodals
         }
         chats.push(chat)
         currentTokens += await tokenizer.tokenizeChat(chat)
@@ -698,7 +723,7 @@ export async function sendChat(chatProcessIndex = -1,arg:{chatAdditonalTokens?:n
 
     function pushPrompts(cha:OpenAIChat[]){
         for(const chat of cha){
-            if(!chat.content){
+            if(!chat.content.trim()){
                 continue
             }
             if(!(db.aiModel.startsWith('gpt') || db.aiModel.startsWith('claude') || db.aiModel === 'openrouter' || db.aiModel === 'reverse_proxy')){
@@ -792,13 +817,13 @@ export async function sendChat(chatProcessIndex = -1,arg:{chatAdditonalTokens?:n
                     let content = card.text
 
                     if(card.type2 === 'globalNote'){
-                        content = (risuChatParser(currentChar.replaceGlobalNote?.replaceAll('{{original}}', content) || content, {chara:currentChar}))
+                        content = (risuChatParser(currentChar.replaceGlobalNote?.replaceAll('{{original}}', content) || content, {chara:currentChar, role: card.role}))
                     }
                     else if(card.type2 === 'main'){
-                        content = (risuChatParser(content, {chara: currentChar}))
+                        content = (risuChatParser(content, {chara: currentChar, role: card.role}))
                     }
                     else{
-                        content = risuChatParser(content, {chara: currentChar})
+                        content = risuChatParser(content, {chara: currentChar, role: card.role})
                     }
 
                     const prompt:OpenAIChat ={

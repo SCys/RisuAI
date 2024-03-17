@@ -7,7 +7,7 @@ import { get } from "svelte/store";
 import {open} from '@tauri-apps/api/shell'
 import { DataBase, loadedStore, setDatabase, type Database, defaultSdDataFunc } from "./database";
 import { appWindow } from "@tauri-apps/api/window";
-import { checkOldDomain, checkUpdate } from "../update";
+import { checkUpdate } from "../update";
 import { botMakerMode, selectedCharID } from "../stores";
 import { Body, ResponseType, fetch as TauriFetch } from "@tauri-apps/api/http";
 import { loadPlugins } from "../plugins/plugins";
@@ -27,6 +27,8 @@ import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import * as CapFS from '@capacitor/filesystem'
 import { save } from "@tauri-apps/api/dialog";
 import type { RisuModule } from "../process/modules";
+import { listen } from '@tauri-apps/api/event'
+import { registerPlugin } from '@capacitor/core';
 
 //@ts-ignore
 export const isTauri = !!window.__TAURI__
@@ -451,7 +453,6 @@ export async function loadData() {
                 else{
                     usingSw = false
                 }
-                checkOldDomain()
                 if(get(DataBase).didFirstSetup){
                     characterURLImport()
                 }
@@ -1279,4 +1280,216 @@ export class LocalWriter{
     async close(){
         await this.writer.close()
     }
+}
+
+let fetchIndex = 0
+let nativeFetchData:{[key:string]:StreamedFetchChunk[]} = {}
+
+interface StreamedFetchChunkData{
+    type:'chunk',
+    body:string,
+    id:string
+}
+
+interface StreamedFetchHeaderData{
+    type:'headers',
+    body:{[key:string]:string},
+    id:string,
+    status:number
+}
+
+interface StreamedFetchEndData{
+    type:'end',
+    id:string
+}
+
+type StreamedFetchChunk = StreamedFetchChunkData|StreamedFetchHeaderData|StreamedFetchEndData
+interface StreamedFetchPlugin {
+    streamedFetch(options: { id: string, url:string, body:string, headers:{[key:string]:string} }): Promise<{"error":string,"success":boolean}>;
+    addListener(eventName: 'streamed_fetch', listenerFunc: (data:StreamedFetchChunk) => void): void;
+}
+
+let streamedFetchListening = false
+let capStreamedFetch:StreamedFetchPlugin|undefined
+
+if(isTauri){
+    listen('streamed_fetch', (event) => {
+        try {
+            const parsed = JSON.parse(event.payload as string)
+            const id = parsed.id
+            nativeFetchData[id]?.push(parsed)
+        } catch (error) {
+            console.error(error)
+        }
+    }).then((v) => {
+        streamedFetchListening = true
+    })
+}
+if(Capacitor.isNativePlatform()){
+    capStreamedFetch = registerPlugin<StreamedFetchPlugin>('CapacitorHttp', CapacitorHttp)
+
+    capStreamedFetch.addListener('streamed_fetch', (data) => {
+        try {
+            nativeFetchData[data.id]?.push(data)
+        } catch (error) {
+            console.error(error)
+        }
+    })
+    streamedFetchListening = true
+}
+
+export async function fetchNative(url:string, arg:{
+    body:string,
+    headers?:{[key:string]:string},
+    method?:"POST",
+    signal?:AbortSignal,
+    useRisuTk?:boolean
+}):Promise<{ body: ReadableStream<Uint8Array>; headers: Headers; status: number }> {
+    let headers = arg.headers ?? {}
+    const db = get(DataBase)
+    let throughProxi = (!isTauri) && (!isNodeServer) && (!db.usePlainFetch) && (!Capacitor.isNativePlatform())
+    if(isTauri || Capacitor.isNativePlatform()){
+        fetchIndex++
+        if(arg.signal && arg.signal.aborted){
+            throw new Error('aborted')
+        }
+        if(fetchIndex >= 100000){
+            fetchIndex = 0
+        }
+        let fetchId = fetchIndex.toString().padStart(5,'0')
+        nativeFetchData[fetchId] = []
+        let resolved = false
+
+        let error = ''
+        while(!streamedFetchListening){
+            await sleep(100)
+        }
+        if(isTauri){
+            invoke('streamed_fetch', {
+                id: fetchId,
+                url: url,
+                headers: JSON.stringify(headers),
+                body: arg.body,
+            }).then((res) => {
+                try {
+                    const parsedRes = JSON.parse(res as string)
+                    if(!parsedRes.success){
+                        error = parsedRes.body
+                        resolved = true
+                    }   
+                } catch (error) {
+                    error = JSON.stringify(error)
+                    resolved = true
+                }
+            })
+        }
+        else if(capStreamedFetch){
+            capStreamedFetch.streamedFetch({
+                id: fetchId,
+                url: url,
+                headers: headers,
+                body: Buffer.from(arg.body).toString('base64'),
+            }).then((res) => {
+                if(!res.success){
+                    error = res.error
+                    resolved = true
+                }
+            })
+        }
+
+        let resHeaders:{[key:string]:string} = null
+        let status = 400
+
+        const readableStream = new ReadableStream<Uint8Array>({
+            async start(controller) {
+                while(!resolved || nativeFetchData[fetchId].length > 0){
+                    if(nativeFetchData[fetchId].length > 0){
+                        const data = nativeFetchData[fetchId].shift()
+                        console.log(data)
+                        if(data.type === 'chunk'){
+                            const chunk = Buffer.from(data.body, 'base64')
+                            controller.enqueue(chunk)
+                        }
+                        if(data.type === 'headers'){
+                            resHeaders = data.body
+                            status = data.status
+                        }
+                        if(data.type === 'end'){
+                            resolved = true
+                        }
+                    }
+                    await sleep(10)
+                }
+                controller.close()
+            }
+        })
+
+        while(resHeaders === null && !resolved){
+            await sleep(10)
+        }
+
+        if(resHeaders === null){
+            resHeaders = {}
+        }
+
+        if(error !== ''){
+            throw new Error(error)
+        }
+
+
+        return {
+            body: readableStream,
+            headers: new Headers(resHeaders),
+            status: status
+        }
+
+
+    }
+    else if(throughProxi){
+        return await fetch(hubURL + `/proxy2`, {
+            body: arg.body,
+            headers: arg.useRisuTk ? {
+                "risu-header": encodeURIComponent(JSON.stringify(headers)),
+                "risu-url": encodeURIComponent(url),
+                "Content-Type": "application/json",
+                "x-risu-tk": "use"
+            }: {
+                "risu-header": encodeURIComponent(JSON.stringify(headers)),
+                "risu-url": encodeURIComponent(url),
+                "Content-Type": "application/json"
+            },
+            method: "POST",
+            signal: arg.signal
+        })
+    }
+    else{
+        return await fetch(url, {
+            body: arg.body,
+            headers: headers,
+            method: arg.method,
+            signal: arg.signal
+        })
+    }
+}
+
+export function textifyReadableStream(stream:ReadableStream<Uint8Array>){
+    return new Response(stream).text()
+}
+
+export function toggleFullscreen(){
+    // @ts-ignore
+    const requestFullscreen = document.documentElement.requestFullscreen ?? document.documentElement.webkitRequestFullscreen as typeof document.documentElement.requestFullscreen
+    // @ts-ignore
+    const exitFullscreen = document.exitFullscreen ?? document.webkitExitFullscreen as typeof document.exitFullscreen
+    // @ts-ignore
+    const fullscreenElement = document.fullscreenElement ?? document.webkitFullscreenElement as typeof document.fullscreenElement
+    fullscreenElement ? exitFullscreen() : requestFullscreen({
+        navigationUI: "hide"
+    })
+}
+
+export function trimNonLatin(data:string){
+    return data .replace(/[^\x00-\x7F]/g, "")
+                .replace(/ +/g, ' ')
+                .trim()
 }

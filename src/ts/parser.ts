@@ -83,7 +83,7 @@ async function parseAdditionalAssets(data:string, char:simpleCharacterArgument|c
     const db = get(DataBase)
     const assetWidthString = (db.assetWidth && db.assetWidth !== -1 || db.assetWidth === 0) ? `max-width:${db.assetWidth}rem;` : ''
 
-    if(char.additionalAssets){
+    if(char.additionalAssets || char.emotionImages){
 
         let assetPaths:{[key:string]:{
             path:string
@@ -93,11 +93,13 @@ async function parseAdditionalAssets(data:string, char:simpleCharacterArgument|c
             path:string
         }} = {}
 
-        for(const asset of char.additionalAssets){
-            const assetPath = await getFileSrc(asset[1])
-            assetPaths[asset[0].toLocaleLowerCase()] = {
-                path: assetPath,
-                ext: asset[2]
+        if(char.additionalAssets){
+            for(const asset of char.additionalAssets){
+                const assetPath = await getFileSrc(asset[1])
+                assetPaths[asset[0].toLocaleLowerCase()] = {
+                    path: assetPath,
+                    ext: asset[2]
+                }
             }
         }
         if(char.emotionImages){
@@ -112,8 +114,7 @@ async function parseAdditionalAssets(data:string, char:simpleCharacterArgument|c
         data = data.replaceAll(assetRegex, (full:string, type:string, name:string) => {
             name = name.toLocaleLowerCase()
             if(type === 'emotion'){
-                console.log(emoPaths, name)
-                const path = emoPaths[name]
+                const path = emoPaths[name]?.path
                 if(!path){
                     return ''
                 }
@@ -153,16 +154,13 @@ async function parseAdditionalAssets(data:string, char:simpleCharacterArgument|c
 }
 
 async function parseInlayImages(data:string){
-    const db = get(DataBase)
-    if(db.inlayImage){
-        const inlayMatch = data.match(/{{inlay::(.+?)}}/g)
-        if(inlayMatch){
-            for(const inlay of inlayMatch){
-                const id = inlay.substring(9, inlay.length - 2)
-                const img = await getInlayImage(id)
-                if(img){
-                    data = data.replace(inlay, `<img src="${img.data}"/>`)
-                }
+    const inlayMatch = data.match(/{{inlay::(.+?)}}/g)
+    if(inlayMatch){
+        for(const inlay of inlayMatch){
+            const id = inlay.substring(9, inlay.length - 2)
+            const img = await getInlayImage(id)
+            if(img){
+                data = data.replace(inlay, `<img src="${img.data}"/>`)
             }
         }
     }
@@ -393,6 +391,8 @@ type matcherArg = {
     var?:{[key:string]:string}
     tokenizeAccurate?:boolean
     consistantChar?:boolean
+    displaying?:boolean
+    role?:string
 }
 const matcher = (p1:string,matcherArg:matcherArg) => {
     if(p1.length > 100000){
@@ -613,8 +613,6 @@ const matcher = (p1:string,matcherArg:matcherArg) => {
                 return "[Cannot get time, previous message was sent in older version]"
             }
 
-            console.log(message.time)
-            console.log(previous_message.time)
             let duration = message.time - previous_message.time
             //output time in format like 10:30:00
             let seconds = Math.floor(duration / 1000)
@@ -627,6 +625,21 @@ const matcher = (p1:string,matcherArg:matcherArg) => {
         }
         case 'br':{
             return '\n'
+        }
+        case 'model':{
+            return db.aiModel
+        }
+        case 'axmodel':{
+            return db.subModel
+        }
+        case 'role': {
+            return matcherArg.role ?? 'role'
+        }
+        case 'jbtoggled':{
+            return db.jailbreakToggle ? '1' : '0'
+        }
+        case 'random':{
+            return Math.random().toString()
         }
     }
     const arra = p1.split("::")
@@ -656,7 +669,8 @@ const matcher = (p1:string,matcherArg:matcherArg) => {
             case 'equal':{
                 return (arra[1] === arra[2]) ? '1' : '0'
             }
-            case 'not_equal':{
+            case 'not_equal':
+            case 'notequal':{
                 return (arra[1] !== arra[2]) ? '1' : '0'
             }
             case 'greater':{
@@ -665,10 +679,12 @@ const matcher = (p1:string,matcherArg:matcherArg) => {
             case 'less':{
                 return (Number(arra[1]) < Number(arra[2])) ? '1' : '0'
             }
-            case 'greater_equal':{
+            case 'greater_equal':
+            case 'greaterequal':{
                 return (Number(arra[1]) >= Number(arra[2])) ? '1' : '0'
             }
-            case 'less_equal':{
+            case 'less_equal':
+            case 'lessequal':{
                 return (Number(arra[1]) <= Number(arra[2])) ? '1' : '0'
             }
             case 'and':{
@@ -679,6 +695,58 @@ const matcher = (p1:string,matcherArg:matcherArg) => {
             }
             case 'not':{
                 return (Number(arra[1]) === 0) ? '1' : '0'
+            }
+            case 'file':{
+                if(matcherArg.displaying){
+                    return `<br><div class="risu-file">${arra[1]}</div><br>`
+                }
+                return Buffer.from(arra[2], 'base64').toString('utf-8') 
+            }
+            case 'startswith':{
+                return arra[1].startsWith(arra[2]) ? '1' : '0'
+            }
+            case 'endswith':{
+                return arra[1].endsWith(arra[2]) ? '1' : '0'
+            }
+            case 'contains':{
+                return arra[1].includes(arra[2]) ? '1' : '0'
+            }
+            case 'replace':{
+                return arra[1].replaceAll(arra[2], arra[3])
+            }
+            case 'split':{
+                return arra[1].split(arra[2]).join('§')
+            }
+            case 'join':{
+                return arra[1].split('§').join(arra[2])
+            }
+            case 'length':{
+                return arra[1].length.toString()
+            }
+            case 'arraylength':
+            case 'array_length':{
+                return arra[1].split('§').length.toString()
+            }
+            case 'lower':{
+                return arra[1].toLocaleLowerCase()
+            }
+            case 'upper':{
+                return arra[1].toLocaleUpperCase()
+            }
+            case 'capitalize':{
+                return arra[1].charAt(0).toUpperCase() + arra[1].slice(1)
+            }
+            case 'round':{
+                return Math.round(Number(arra[1])).toString()
+            }
+            case 'floor':{
+                return Math.floor(Number(arra[1])).toString()
+            }
+            case 'ceil':{
+                return Math.ceil(Number(arra[1])).toString()
+            }
+            case 'abs':{
+                return Math.abs(Number(arra[1])).toString()
             }
         }
     }
@@ -717,6 +785,9 @@ const matcher = (p1:string,matcherArg:matcherArg) => {
 }
 
 const smMatcher = (p1:string,matcherArg:matcherArg) => {
+    if(!p1){
+        return null
+    }
     const lowerCased = p1.toLocaleLowerCase()
     const db = matcherArg.db
     const chara = matcherArg.chara
@@ -808,7 +879,8 @@ export function risuChatParser(da:string, arg:{
     var?:{[key:string]:string}
     tokenizeAccurate?:boolean
     consistantChar?:boolean
-    visualize?:boolean
+    visualize?:boolean,
+    role?:string
 } = {}):string{
     const chatID = arg.chatID ?? -1
     const db = arg.db ?? get(DataBase)
@@ -852,7 +924,9 @@ export function risuChatParser(da:string, arg:{
         rmVar: arg.rmVar ?? false,
         db: db,
         var: arg.var ?? null,
-        tokenizeAccurate: arg.tokenizeAccurate ?? false
+        tokenizeAccurate: arg.tokenizeAccurate ?? false,
+        displaying: arg.visualize ?? false,
+        role: arg.role
     }
     let pef = performance.now()
     while(pointer < da.length){
