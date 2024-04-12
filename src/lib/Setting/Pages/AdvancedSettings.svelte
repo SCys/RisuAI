@@ -38,12 +38,20 @@
 <NumberInput marginBottom={true} size={"sm"} min={0} max={4096} bind:value={$DataBase.genTime}/>
 
 <span class="text-textcolor mt-4">GPT Vision Quality <Help key="gptVisionQuality"/></span>
-{#if $DataBase.inlayImage}
-    <SelectInput bind:value={$DataBase.gptVisionQuality}>
-        <OptionInput value="low">Low</OptionInput>
-        <OptionInput value="high">High</OptionInput>
-    </SelectInput>
-{/if}
+<SelectInput bind:value={$DataBase.gptVisionQuality}>
+    <OptionInput value="low">Low</OptionInput>
+    <OptionInput value="high">High</OptionInput>
+</SelectInput>
+
+<span class="text-textcolor mt-4">{language.heightMode}</span>
+<SelectInput bind:value={$DataBase.heightMode}>
+    <OptionInput value="normal">Normal</OptionInput>
+    <OptionInput value="percent">Percent</OptionInput>
+    <OptionInput value="vh">VH</OptionInput>
+    <OptionInput value="dvh">DVH</OptionInput>
+    <OptionInput value="svh">SVH</OptionInput>
+    <OptionInput value="lvh">LVH</OptionInput>
+</SelectInput>
 
 <div class="flex items-center mt-4">
     <Check bind:check={$DataBase.useSayNothing} name={language.sayNothing}> <Help key="sayNothing"/></Check>
@@ -67,16 +75,19 @@
     <Check bind:check={$DataBase.newOAIHandle} name={language.newOAIHandle}/>
 </div>
 <div class="flex items-center mt-4">
+    <Check bind:check={$DataBase.noWaitForTranslate} name={language.noWaitForTranslate}/>
+</div>
+<div class="flex items-center mt-4">
     <Check bind:check={$DataBase.allowAllExtentionFiles} name="Allow all in file select"/>
+</div>
+<div class="flex items-center mt-4">
+    <Check bind:check={$DataBase.antiClaudeOverload} name={language.antiClaudeOverload}>
+        <Help key="experimental"/><Help key="antiClaudeOverload"/>
+    </Check>
 </div>
 <div class="flex items-center mt-4">
     <Check bind:check={$DataBase.putUserOpen} name={language.oaiRandomUser}>
         <Help key="experimental"/><Help key="oaiRandomUser"/>
-    </Check>
-</div>
-<div class="flex items-center mt-4">
-    <Check bind:check={$DataBase.inlayImage} name={language.postFile}>
-        <Help key="experimental"/><Help key="inlayImages"/>
     </Check>
 </div>
 <div class="flex items-center mt-4">

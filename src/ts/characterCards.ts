@@ -1,13 +1,13 @@
 import { get, writable, type Writable } from "svelte/store"
 import { alertCardExport, alertConfirm, alertError, alertInput, alertMd, alertNormal, alertSelect, alertStore, alertTOS, alertWait } from "./alert"
 import { DataBase, defaultSdDataFunc, type character, setDatabase, type customscript, type loreSettings, type loreBook, type triggerscript } from "./storage/database"
-import { checkNullish, decryptBuffer, encryptBuffer, selectMultipleFile, sleep } from "./util"
+import { checkNullish, decryptBuffer, encryptBuffer, selectFileByDom, selectMultipleFile, sleep } from "./util"
 import { language } from "src/lang"
 import { v4 as uuidv4 } from 'uuid';
 import { characterFormatUpdate } from "./characters"
-import { checkCharOrder, downloadFile, loadAsset, LocalWriter, readImage, saveAsset } from "./storage/globalApi"
-import { cloneDeep } from "lodash"
-import { selectedCharID } from "./stores"
+import { AppendableBuffer, checkCharOrder, downloadFile, loadAsset, LocalWriter, readImage, saveAsset, VirtualWriter } from "./storage/globalApi"
+import { cloneDeep, update } from "lodash"
+import { CurrentCharacter, selectedCharID } from "./stores"
 import { convertImage, hasher } from "./parser"
 
 import { reencodeImage } from "./process/files/image"
@@ -18,13 +18,17 @@ export const hubURL = "https://sv.risuai.xyz"
 
 export async function importCharacter() {
     try {
-        const files = await selectMultipleFile(['png', 'json'])
+        const files = await selectFileByDom(['png', 'json'], 'multiple')
         if(!files){
             return
         }
 
         for(const f of files){
-            await importCharacterProcess(f)
+            console.log(f)
+            await importCharacterProcess({
+                name: f.name,
+                data: f
+            })
             checkCharOrder()
         }
     } catch (error) {
@@ -35,10 +39,14 @@ export async function importCharacter() {
 
 async function importCharacterProcess(f:{
     name: string;
-    data: Uint8Array;
+    data: Uint8Array|File|ReadableStream<Uint8Array>
 }) {
     if(f.name.endsWith('json')){
-        const da = JSON.parse(Buffer.from(f.data).toString('utf-8'))
+        if(f.data instanceof ReadableStream){
+            return null
+        }
+        const data = f.data instanceof Uint8Array ? f.data : new Uint8Array(await f.data.arrayBuffer())
+        const da = JSON.parse(Buffer.from(data).toString('utf-8'))
         if(await importSpecv2(da)){
             let db = get(DataBase)
             return db.characters.length - 1
@@ -60,22 +68,29 @@ async function importCharacterProcess(f:{
         msg: 'Loading... (Reading)'
     })
     await sleep(10)
-    const img = f.data
     
     // const readed = PngChunk.read(img, ['chara'])?.['chara']
     let readedChara = ''
-    const readGenerator = PngChunk.readGenerator(img)
+    let img:Uint8Array
+    const readGenerator = PngChunk.readGenerator(f.data, {
+        returnTrimed: true
+    })
     const assets:{[key:string]:string} = {}
-    for await(const chunk of readGenerator){
+    for await (const chunk of readGenerator){
+        console.log(chunk)
         if(!chunk){
+            continue
+        }
+        if(chunk instanceof AppendableBuffer){
+            img = chunk.buffer
             break
         }
         if(chunk.key === 'chara'){
             //For memory reason, limit to 2MB
             if(readedChara.length < 2 * 1024 * 1024){
-                readedChara = chunk.value.replaceAll('\0', '')
+                readedChara = chunk.value
             }
-            break
+            continue
         }
         if(chunk.key.startsWith('chara-ext-asset_')){
             const assetIndex = (chunk.key.replace('chara-ext-asset_', ''))
@@ -86,6 +101,12 @@ async function importCharacterProcess(f:{
         }
     }
     if(!readedChara){
+        alertError(language.errors.noData)
+        return
+    }
+
+    if(!img){
+        console.error("No Image Found")
         alertError(language.errors.noData)
         return
     }
@@ -169,12 +190,7 @@ export async function characterURLImport() {
             url.searchParams.delete('realm');
             window.history.pushState(null, '', url.toString());
 
-            const res = await fetch(`${hubURL}/hub/info`,{
-                method: "POST",
-                body: JSON.stringify({
-                    id: realmPath
-                })
-            })
+            const res = await fetch(`${hubURL}/hub/info/${realmPath}`)
             if(res.status !== 200){
                 alertError(await res.text())
                 return
@@ -484,14 +500,15 @@ async function importSpecv2(card:CharacterCardV2, img?:Uint8Array, mode:'hub'|'n
         triggerscript: data?.extensions?.risuai?.triggerscript ?? [],
         private: data?.extensions?.risuai?.private ?? false,
         additionalText: data?.extensions?.risuai?.additionalText ?? '',
-        virtualscript: data?.extensions?.risuai?.virtualscript ?? '',
+        virtualscript: '', //removed dude to security issue
         extentions: ext ?? {},
         largePortrait: data?.extensions?.risuai?.largePortrait ?? (!data?.extensions?.risuai),
         lorePlus: data?.extensions?.risuai?.lorePlus ?? false,
         inlayViewScreen: data?.extensions?.risuai?.inlayViewScreen ?? false,
         newGenData: data?.extensions?.risuai?.newGenData ?? undefined,
         vits: vits,
-        ttsMode: vits ? 'vits' : 'normal'
+        ttsMode: vits ? 'vits' : 'normal',
+        imported: true,
     }
 
     db.characters.push(char)
@@ -577,7 +594,7 @@ async function createBaseV2(char:character) {
                     license: char.license,
                     triggerscript: char.triggerscript,
                     additionalText: char.additionalText,
-                    virtualscript: char.virtualscript,
+                    virtualscript: '', //removed dude to security issue
                     largePortrait: char.largePortrait,
                     lorePlus: char.lorePlus,
                     inlayViewScreen: char.inlayViewScreen,
@@ -601,15 +618,20 @@ async function createBaseV2(char:character) {
 }
 
 
-export async function exportSpecV2(char:character, type:'png'|'json'|'rcc' = 'png', rcc:{password?:string} = {}) {
+export async function exportSpecV2(char:character, type:'png'|'json'|'rcc' = 'png', arg:{
+    password?:string
+    writer?:LocalWriter|VirtualWriter
+} = {}) {
     let img = await readImage(char.image)
 
     try{
         char.image = ''
         const card = await createBaseV2(char)
         img = await reencodeImage(img)
-        const localWriter = new LocalWriter()
-        await localWriter.init(`Image file`, ['png'])
+        const localWriter = arg.writer ?? (new LocalWriter())
+        if(!arg.writer){
+            await (localWriter as LocalWriter).init(`Image file`, ['png'])
+        }
         const writer = new PngChunk.streamWriter(img, localWriter)
         await writer.init()
         let assetIndex = 0
@@ -673,7 +695,7 @@ export async function exportSpecV2(char:character, type:'png'|'json'|'rcc' = 'pn
         })
 
         if(type === 'rcc'){
-            const password = rcc.password || 'RISU_NONE'
+            const password = arg.password || 'RISU_NONE'
             const json = JSON.stringify(card)
             const encrypted = Buffer.from(await encryptBuffer(Buffer.from(json, 'utf-8'), password))
             const hashed = await hasher(encrypted)
@@ -692,13 +714,78 @@ export async function exportSpecV2(char:character, type:'png'|'json'|'rcc' = 'pn
 
         await sleep(10)
 
-        alertNormal(language.successExport)
+        if(!arg.writer){
+            alertNormal(language.successExport)
+        }
 
     }
     catch(e){
         console.error(e, e.stack)
         alertError(`${e}`)
     }
+}
+
+export async function shareRisuHub2(char:character, arg:{
+    nsfw: boolean,
+    tag:string
+    license: string
+    anon: boolean,
+    update: boolean
+}) {
+    try {
+        char = cloneDeep(char)
+        char.license = arg.license
+        let tagList = arg.tag.split(',')
+        
+        if(arg.nsfw){
+            tagList.push("nsfw")
+        }
+    
+        await alertWait("Uploading...")
+        
+    
+        let tags = tagList.filter((v, i) => {
+            return (!!v) && (tagList.indexOf(v) === i)
+        })
+        char.tags = tags
+    
+    
+        const writer = new VirtualWriter()
+        await exportSpecV2(char, 'png', {writer: writer})
+    
+        const fetchPromise = fetch(hubURL + '/hub/realm/upload', {
+            method: "POST",
+            body: writer.buf.buffer,
+            headers: {
+                "Content-Type": 'image/png',
+                "x-risu-api-version": "4",
+                "x-risu-token": get(DataBase)?.account?.token,
+                'x-risu-username': arg.anon ? '' : (get(DataBase)?.account?.id),
+                'x-risu-debug': 'true',
+                'x-risu-update-id': arg.update ? (char.realmId ?? 'null') : 'null'
+            }
+        })
+    
+    
+        const res = await fetchPromise
+    
+        if(res.status !== 200){
+            alertError(await res.text())
+        }
+        else{
+            const resJSON = await res.json()
+            alertMd(resJSON.message)
+            const currentChar = get(CurrentCharacter)
+            if(currentChar.type === 'group'){
+                return
+            }
+            currentChar.realmId = resJSON.id
+            CurrentCharacter.set(currentChar)
+        }   
+    } catch (error) {
+        alertError(`${error}`)
+    }
+
 }
 
 export async function shareRisuHub(char:character, arg:{
@@ -826,15 +913,22 @@ export async function downloadRisuHub(id:string) {
             type: "wait",
             msg: "Downloading..."
         })
-        const res = await fetch(hubURL + '/hub/get', {
-            method: "POST",
-            body: JSON.stringify({
-                id: id,
-                apiver: 3
-            })
+        const res = await fetch(hubURL + '/hub/get/' + id, {
+            headers: {
+                "x-risu-api-version": "4"
+            }
         })
         if(res.status !== 200){
             alertError(await res.text())
+            return
+        }
+
+        if(res.headers.get('content-type') === 'image/png'){
+            await importCharacterProcess({
+                name: 'realm.png',
+                data: res.body
+            })
+            checkCharOrder()
             return
         }
     

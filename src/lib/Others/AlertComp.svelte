@@ -1,11 +1,10 @@
-<script>
-    import { onMount } from 'svelte';
-    import { alertStore } from "../../ts/alert";
+<script lang="ts">
+    import { alertStore, alertGenerationInfoStore } from "../../ts/alert";
     import { DataBase } from '../../ts/storage/database';
     import { getCharImage } from '../../ts/characters';
     import { ParseMarkdown } from '../../ts/parser';
     import BarIcon from '../SideBars/BarIcon.svelte';
-    import { User } from 'lucide-svelte';
+    import { ChevronRightIcon, User } from 'lucide-svelte';
     import { hubURL } from 'src/ts/characterCards';
     import TextInput from '../UI/GUI/TextInput.svelte';
     import { openURL } from 'src/ts/storage/globalApi';
@@ -15,11 +14,15 @@
     import { CCLicenseData } from "src/ts/creation/license";
     import OptionInput from "../UI/GUI/OptionInput.svelte";
     import { language } from 'src/lang';
+    import { getFetchData } from 'src/ts/storage/globalApi';
+  import { CurrentChat } from "src/ts/stores";
+  import { tokenize } from "src/ts/tokenizer";
     let btn
     let input = ''
     let cardExportType = ''
     let cardExportPassword = ''
     let cardLicense = ''
+    let generationInfoMenuIndex = 0
     $: (() => {
         if(btn){
             btn.focus()
@@ -29,6 +32,14 @@
         }
         
     })()
+
+    const beautifyJSON = (data:string) =>{
+        try {
+            return JSON.stringify(JSON.parse(data), null, 2)
+        } catch (error) {
+            return data
+        }
+    }
 </script>
 
 <svelte:window on:message={async (e) => {
@@ -66,7 +77,7 @@
                 <div class="text-textcolor">You should accept RisuRealm's <a class="text-green-600 hover:text-green-500 transition-colors duration-200 cursor-pointer" on:click={() => {
                     openURL('https://sv.risuai.xyz/hub/tos')
                 }}>Terms of Service</a> to continue</div>
-            {:else if $alertStore.type !== 'select'}
+            {:else if $alertStore.type !== 'select' && $alertStore.type !== 'requestdata' && $alertStore.type !== 'addchar'}
                 <span class="text-gray-300">{$alertStore.msg}</span>
                 {#if $alertStore.submsg}
                     <span class="text-gray-500 text-sm">{$alertStore.submsg}</span>
@@ -161,6 +172,154 @@
                             {/if}
                         {/if}
                     {/each}
+                </div>
+            {:else if $alertStore.type === 'requestdata'}
+                <div class="flex flex-wrap gap-2">
+                    <Button selected={generationInfoMenuIndex === 0} size="sm" on:click={() => {generationInfoMenuIndex = 0}}>
+                        {language.tokens}
+                    </Button>
+                    <Button selected={generationInfoMenuIndex === 1} size="sm" on:click={() => {generationInfoMenuIndex = 1}}>
+                        {language.metaData}
+                    </Button>
+                    <Button selected={generationInfoMenuIndex === 2} size="sm" on:click={() => {generationInfoMenuIndex = 2}}>
+                        {language.log}
+                    </Button>
+                    <button class="ml-auto" on:click={() => {
+                        alertStore.set({
+                            type: 'none',
+                            msg: ''
+                        })
+                    }}>✖</button>
+                </div>
+                {#if generationInfoMenuIndex === 0}
+                    <div class="mt-4 flex justify-center w-full">
+                        <div class="w-32 h-32 border-darkborderc border-4 rounded-lg" style:background={
+                            `linear-gradient(0deg,
+                            rgb(59,130,246) 0%,
+                            rgb(59,130,246) ${($alertGenerationInfoStore.genInfo.inputTokens / $alertGenerationInfoStore.genInfo.maxContext) * 100}%,
+                            rgb(34 197 94) ${($alertGenerationInfoStore.genInfo.inputTokens / $alertGenerationInfoStore.genInfo.maxContext) * 100}%,
+                            rgb(34 197 94) ${(($alertGenerationInfoStore.genInfo.outputTokens + $alertGenerationInfoStore.genInfo.inputTokens) / $alertGenerationInfoStore.genInfo.maxContext) * 100}%,
+                            rgb(156 163 175) ${(($alertGenerationInfoStore.genInfo.outputTokens + $alertGenerationInfoStore.genInfo.inputTokens) / $alertGenerationInfoStore.genInfo.maxContext) * 100}%,
+                            rgb(156 163 175) 100%)`
+                        }>
+
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-y-2 gap-x-4 mt-4">
+                        <span class="text-blue-500">{language.inputTokens}</span>
+                        <span class="text-blue-500 justify-self-end">{$alertGenerationInfoStore.genInfo.inputTokens ?? '?'} {language.tokens}</span>
+                        <span class="text-green-500">{language.outputTokens}</span>
+                        <span class="text-green-500 justify-self-end">{$alertGenerationInfoStore.genInfo.outputTokens ?? '?'} {language.tokens}</span>
+                        <span class="text-gray-400">{language.maxContextSize}</span>
+                        <span class="text-gray-400 justify-self-end">{$alertGenerationInfoStore.genInfo.maxContext ?? '?'} {language.tokens}</span>
+                    </div>
+                    <span class="text-textcolor2 text-sm">{language.tokenWarning}</span>
+                {/if}
+                {#if generationInfoMenuIndex === 1}
+                <div class="grid grid-cols-2 gap-y-2 gap-x-4 mt-4">
+                    <span class="text-blue-500">Index</span>
+                    <span class="text-blue-500 justify-self-end">{$alertGenerationInfoStore.idx}</span>
+                    <span class="text-amber-500">Model</span>
+                    <span class="text-amber-500 justify-self-end">{$alertGenerationInfoStore.genInfo.model}</span>
+                    <span class="text-green-500">ID</span>
+                    <span class="text-green-500 justify-self-end">{$CurrentChat.message[$alertGenerationInfoStore.idx].chatId ?? "None"}</span>
+                    <span class="text-red-500">GenID</span>
+                    <span class="text-red-500 justify-self-end">{$alertGenerationInfoStore.genInfo.generationId}</span>
+                    <span class="text-cyan-500">Saying</span>
+                    <span class="text-cyan-500 justify-self-end">{$CurrentChat.message[$alertGenerationInfoStore.idx].saying}</span>
+                    <span class="text-purple-500">Size</span>
+                    <span class="text-purple-500 justify-self-end">{JSON.stringify($CurrentChat.message[$alertGenerationInfoStore.idx]).length} Bytes</span>
+                    <span class="text-yellow-500">Time</span>
+                    <span class="text-yellow-500 justify-self-end">{(new Date($CurrentChat.message[$alertGenerationInfoStore.idx].time ?? 0)).toLocaleString()}</span>
+                    <span class="text-green-500">Tokens</span>
+                    {#await tokenize($CurrentChat.message[$alertGenerationInfoStore.idx].data)}
+                        <span class="text-green-500 justify-self-end">Loading</span>
+                    {:then tokens} 
+                        <span class="text-green-500 justify-self-end">{tokens}</span>
+                    {/await}
+                </div>
+                {/if}
+                {#if generationInfoMenuIndex === 2}
+                    {#await getFetchData($alertStore.msg) then data} 
+                        {#if !data}
+                            <span class="text-gray-300 text-lg mt-2">{language.errors.requestLogRemoved}</span>
+                            <span class="text-gray-500">{language.errors.requestLogRemovedDesc}</span>
+                        {:else}
+                            <h1 class="text-2xl font-bold my-4">URL</h1>
+                            <code class="text-gray-300 border border-darkborderc p-2 rounded-md whitespace-pre-wrap">{data.url}</code>
+                            <h1 class="text-2xl font-bold my-4">Request Body</h1>
+                            <code class="text-gray-300 border border-darkborderc p-2 rounded-md whitespace-pre-wrap">{beautifyJSON(data.body)}</code>
+                            <h1 class="text-2xl font-bold my-4">Response</h1>
+                            <code class="text-gray-300 border border-darkborderc p-2 rounded-md whitespace-pre-wrap">{beautifyJSON(data.response)}</code>
+                        {/if}
+                    {/await}
+                {/if}
+            {:else if $alertStore.type === 'addchar'}
+                <div class="w-2xl flex flex-col max-w-full">
+
+                    <button class="border-darkborderc border py-12 px-8 flex rounded-md hover:ring-2 justify-center items-center" on:click={() => {
+                        alertStore.set({
+                            type: 'none',
+                            msg: 'importFromRealm'
+                        })
+                    }}>
+                        <div class="flex flex-col justify-start items-start">
+                            <span class="text-2xl font-bold">{language.importFromRealm}</span>
+                            <span class="text-textcolor2">{language.importFromRealmDesc}</span>
+                        </div>
+                        <div class="ml-9 float-right flex-1 flex justify-end">
+                            <ChevronRightIcon />
+                        </div>
+                    </button>
+                    <button class="border-darkborderc border py-2 px-8 flex rounded-md hover:ring-2 items-center mt-2" on:click={() => {
+                        alertStore.set({
+                            type: 'none',
+                            msg: 'importCharacter'
+                        })
+                    }}>
+                        <div class="flex flex-col justify-start items-start">
+                            <span>{language.importCharacter}</span>
+                        </div>
+                        <div class="ml-9 float-right flex-1 flex justify-end">
+                            <ChevronRightIcon />
+                        </div>
+                    </button>
+                    <button class="border-darkborderc border py-2 px-8 flex rounded-md hover:ring-2 items-center mt-2" on:click={() => {
+                        alertStore.set({
+                            type: 'none',
+                            msg: 'createfromScratch'
+                        })
+                    }}>
+                        <div class="flex flex-col justify-start items-start">
+                            <span>{language.createfromScratch}</span>
+                        </div>
+                        <div class="ml-9 float-right flex-1 flex justify-end">
+                            <ChevronRightIcon />
+                        </div>
+                    </button>
+                    <button class="border-darkborderc border py-2 px-8 flex rounded-md hover:ring-2 items-center mt-2" on:click={() => {
+                        alertStore.set({
+                            type: 'none',
+                            msg: 'createGroup'
+                        })
+                    }}>
+                        <div class="flex flex-col justify-start items-start">
+                            <span>{language.createGroup}</span>
+                        </div>
+                        <div class="ml-9 float-right flex-1 flex justify-end">
+                            <ChevronRightIcon />
+                        </div>
+                    </button>
+                    <button class="border-darkborderc border py-2 px-8 flex rounded-md hover:ring-2 items-center mt-2" on:click={() => {
+                        alertStore.set({
+                            type: 'none',
+                            msg: 'cancel'
+                        })
+                    }}>
+                        <div class="flex flex-col justify-start items-start">
+                            <span>{language.cancel}</span>
+                        </div>
+                    </button>
                 </div>
             {/if}
         </div>

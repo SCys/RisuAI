@@ -2,14 +2,14 @@ import DOMPurify from 'isomorphic-dompurify';
 import showdown from 'showdown';
 import { Marked } from 'marked';
 
-import { DataBase, type Database, type Message, type character, type customscript, type groupChat } from './storage/database';
+import { DataBase, setDatabase, type Database, type Message, type character, type customscript, type groupChat } from './storage/database';
 import { getFileSrc } from './storage/globalApi';
 import { processScriptFull } from './process/scripts';
 import { get } from 'svelte/store';
 import css from '@adobe/css-tools'
 import { selectedCharID } from './stores';
 import { calcString } from './process/infunctions';
-import { findCharacterbyId } from './util';
+import { findCharacterbyId, sfc32, uuidtoNumber } from './util';
 import { getInlayImage } from './process/files/image';
 import { autoMarkNew } from './plugins/automark';
 import { getModuleLorebooks } from './process/modules';
@@ -196,7 +196,7 @@ export async function ParseMarkdown(data:string, charArg:(character|simpleCharac
     if(db.automark){
         return (DOMPurify.sanitize(autoMarkNew(data), {
             ADD_TAGS: ["iframe", "style", "risu-style", "x-em"],
-            ADD_ATTR: ["allow", "allowfullscreen", "frameborder", "scrolling", "risu-btn"],
+            ADD_ATTR: ["allow", "allowfullscreen", "frameborder", "scrolling", "risu-btn", 'risu-trigger'],
         }))
     }
     else{
@@ -204,7 +204,7 @@ export async function ParseMarkdown(data:string, charArg:(character|simpleCharac
         data = mconverted.parse(data)
         return decodeStyle(DOMPurify.sanitize(data, {
             ADD_TAGS: ["iframe", "style", "risu-style", "x-em"],
-            ADD_ATTR: ["allow", "allowfullscreen", "frameborder", "scrolling", "risu-btn"],
+            ADD_ATTR: ["allow", "allowfullscreen", "frameborder", "scrolling", "risu-btn", 'risu-trigger'],
         }))
     }
 }
@@ -393,395 +393,592 @@ type matcherArg = {
     consistantChar?:boolean
     displaying?:boolean
     role?:string
+    runVar?:boolean
 }
 const matcher = (p1:string,matcherArg:matcherArg) => {
-    if(p1.length > 100000){
-        return ''
-    }
-    const lowerCased = p1.toLocaleLowerCase()
-    const chatID = matcherArg.chatID
-    const db = matcherArg.db
-    const chara = matcherArg.chara
-    switch(lowerCased){
-        case 'previous_char_chat':{
-            if(chatID !== -1){
-                const selchar = db.characters[get(selectedCharID)]
-                const chat = selchar.chats[selchar.chatPage]
-                let pointer = chatID - 1
-                while(pointer >= 0){
-                    if(chat.message[pointer].role === 'char'){
-                        return chat.message[pointer].data
+    try {
+        if(p1.length > 100000){
+            return ''
+        }
+        const lowerCased = p1.toLocaleLowerCase()
+        const chatID = matcherArg.chatID
+        const db = matcherArg.db
+        const chara = matcherArg.chara
+        switch(lowerCased){
+            case 'previous_char_chat':
+            case 'lastcharmessage':{
+                if(chatID !== -1){
+                    const selchar = db.characters[get(selectedCharID)]
+                    const chat = selchar.chats[selchar.chatPage]
+                    let pointer = chatID - 1
+                    while(pointer >= 0){
+                        if(chat.message[pointer].role === 'char'){
+                            return chat.message[pointer].data
+                        }
+                        pointer--
                     }
-                    pointer--
+                    return selchar.firstMsgIndex === -1 ? selchar.firstMessage : selchar.alternateGreetings[selchar.firstMsgIndex]
                 }
-                return selchar.firstMsgIndex === -1 ? selchar.firstMessage : selchar.alternateGreetings[selchar.firstMsgIndex]
+                return ''
             }
-            return ''
-        }
-        case 'previous_user_chat':{
-            if(chatID !== -1){
-                const selchar = db.characters[get(selectedCharID)]
-                const chat = selchar.chats[selchar.chatPage]
-                let pointer = chatID - 1
-                while(pointer >= 0){
-                    if(chat.message[pointer].role === 'user'){
-                        return chat.message[pointer].data
+            case 'previous_user_chat':
+            case 'lastusermessage':{
+                if(chatID !== -1){
+                    const selchar = db.characters[get(selectedCharID)]
+                    const chat = selchar.chats[selchar.chatPage]
+                    let pointer = chatID - 1
+                    while(pointer >= 0){
+                        if(chat.message[pointer].role === 'user'){
+                            return chat.message[pointer].data
+                        }
+                        pointer--
                     }
-                    pointer--
+                    return selchar.firstMsgIndex === -1 ? selchar.firstMessage : selchar.alternateGreetings[selchar.firstMsgIndex]
                 }
-                return selchar.firstMsgIndex === -1 ? selchar.firstMessage : selchar.alternateGreetings[selchar.firstMsgIndex]
+                return ''
             }
-            return ''
-        }
-        case 'char':
-        case 'bot':{
-            if(matcherArg.consistantChar){
-                return 'botname'
-            }
-            let selectedChar = get(selectedCharID)
-            let currentChar = db.characters[selectedChar]
-            if(currentChar && currentChar.type !== 'group'){
-                return currentChar.name
-            }
-            if(chara){
-                if(typeof(chara) === 'string'){
-                    return chara
+            case 'char':
+            case 'bot':{
+                if(matcherArg.consistantChar){
+                    return 'botname'
                 }
-                else{
-                    return chara.name
+                let selectedChar = get(selectedCharID)
+                let currentChar = db.characters[selectedChar]
+                if(currentChar && currentChar.type !== 'group'){
+                    return currentChar.name
                 }
-            }
-            return currentChar.name
-        }
-        case 'user':{
-            if(matcherArg.consistantChar){
-                return 'username'
-            }
-            return db.username
-        }
-        case 'personality':
-        case 'char_persona':{
-            const argChara = chara
-            const achara = (argChara && typeof(argChara) !== 'string') ? argChara : (db.characters[get(selectedCharID)])
-            if(achara.type === 'group'){
-                return ""
-            }
-            return achara.personality
-        }
-        case 'description':
-        case 'char_desc':{
-            const argChara = chara
-            const achara = (argChara && typeof(argChara) !== 'string') ? argChara : (db.characters[get(selectedCharID)])
-            if(achara.type === 'group'){
-                return ""
-            }
-            return achara.desc
-        }
-        case 'scenario':{
-            const argChara = chara
-            const achara = (argChara && typeof(argChara) !== 'string') ? argChara : (db.characters[get(selectedCharID)])
-            if(achara.type === 'group'){
-                return ""
-            }
-            return achara.scenario
-        }
-        case 'example_dialogue':
-        case 'example_message':{
-            const argChara = chara
-            const achara = (argChara && typeof(argChara) !== 'string') ? argChara : (db.characters[get(selectedCharID)])
-            if(achara.type === 'group'){
-                return ""
-            }
-            return achara.exampleMessage
-        }
-        case 'persona':
-        case 'user_persona':{
-            return db.personaPrompt
-        }
-        case 'main_prompt':
-        case 'system_prompt':{
-            return db.mainPrompt
-        }
-        case 'lorebook':
-        case 'world_info':{
-            const argChara = chara
-            const achara = (argChara && typeof(argChara) !== 'string') ? argChara : (db.characters[get(selectedCharID)])
-            const selchar = db.characters[get(selectedCharID)]
-            const chat = selchar.chats[selchar.chatPage]
-            const characterLore = (achara.type === 'group') ? [] : (achara.globalLore ?? [])
-            const chatLore = chat.localLore ?? []
-            const fullLore = characterLore.concat(chatLore.concat(getModuleLorebooks()))
-            return fullLore.map((f) => {
-                return JSON.stringify(f)
-            }).join("§\n")
-        }
-        case 'history':
-        case 'messages':{
-            const selchar = db.characters[get(selectedCharID)]
-            const chat = selchar.chats[selchar.chatPage]
-            return chat.message.map((f) => {
-                return JSON.stringify(f)
-            }).join("§\n")
-        }
-        case 'ujb':
-        case 'global_note':
-        case 'system_note':{
-            return db.globalNote
-        }
-        case 'chat_index':{
-            return chatID.toString() 
-        }
-        case 'blank':
-        case 'none':{
-            return ''
-        }
-        case 'time':{
-            if(matcherArg.tokenizeAccurate){
-                return `00:00:00`
-            }
-            if(chatID === -1){
-                return "[Cannot get time]"
-            }
-
-            const selchar = db.characters[get(selectedCharID)]
-            const chat = selchar.chats[selchar.chatPage]
-            const message = chat.message[chatID]
-            if(!message.time){
-                return "[Cannot get time, message was sent in older version]"
-            }
-            const date = new Date(message.time)
-            //output time in format like 10:30 AM
-            return date.toLocaleTimeString()
-        }
-        case 'date':{
-            if(matcherArg.tokenizeAccurate){
-                return `00:00:00`
-            }
-            if(chatID === -1){
-                return "[Cannot get time]"
-            }
-            const selchar = db.characters[get(selectedCharID)]
-            const chat = selchar.chats[selchar.chatPage]
-            const message = chat.message[chatID]
-            if(!message.time){
-                return "[Cannot get time, message was sent in older version]"
-            }
-            const date = new Date(message.time)
-            //output date in format like Aug 23, 2021
-            return date.toLocaleDateString()
-        }
-        case 'idle_duration':{
-            if(matcherArg.tokenizeAccurate){
-                return `00:00:00`
-            }
-            if(chatID === -1){
-                return "[Cannot get time]"
-            }
-            const selchar = db.characters[get(selectedCharID)]
-            const chat = selchar.chats[selchar.chatPage]
-            
-            //get latest user message
-            let pointer = chatID
-            let pointerMode: 'findLast'|'findSecondLast' = 'findLast'
-            let message:Message
-            let previous_message:Message
-            while(pointer >= 0){
-                if(chat.message[pointer].role === 'user'){
-                    if(pointerMode === 'findLast'){
-                        message = chat.message[pointer]
-                        pointerMode = 'findSecondLast'
+                if(chara){
+                    if(typeof(chara) === 'string'){
+                        return chara
                     }
                     else{
-                        previous_message = chat.message[pointer]
-                        break
+                        return chara.name
                     }
                 }
-                pointer--
+                return currentChar.name
             }
-
-            if(!message){
-                return '[No user message found]'
+            case 'user':{
+                if(matcherArg.consistantChar){
+                    return 'username'
+                }
+                return db.username
             }
-
-            if(!previous_message){
-                return '[No previous user message found]'
+            case 'personality':
+            case 'char_persona':{
+                const argChara = chara
+                const achara = (argChara && typeof(argChara) !== 'string') ? argChara : (db.characters[get(selectedCharID)])
+                if(achara.type === 'group'){
+                    return ""
+                }
+                return achara.personality
             }
-            if(!message.time){
-                return "[Cannot get time, message was sent in older version]"
+            case 'description':
+            case 'char_desc':{
+                const argChara = chara
+                const achara = (argChara && typeof(argChara) !== 'string') ? argChara : (db.characters[get(selectedCharID)])
+                if(achara.type === 'group'){
+                    return ""
+                }
+                return achara.desc
             }
-            if(!previous_message.time){
-                return "[Cannot get time, previous message was sent in older version]"
+            case 'scenario':{
+                const argChara = chara
+                const achara = (argChara && typeof(argChara) !== 'string') ? argChara : (db.characters[get(selectedCharID)])
+                if(achara.type === 'group'){
+                    return ""
+                }
+                return achara.scenario
             }
-
-            let duration = message.time - previous_message.time
-            //output time in format like 10:30:00
-            let seconds = Math.floor(duration / 1000)
-            let minutes = Math.floor(seconds / 60)
-            let hours = Math.floor(minutes / 60)
-            seconds = seconds % 60
-            minutes = minutes % 60
-            //output, like 1:30:00
-            return hours.toString() + ':' + minutes.toString().padStart(2,'0') + ':' + seconds.toString().padStart(2,'0')
-        }
-        case 'br':{
-            return '\n'
-        }
-        case 'model':{
-            return db.aiModel
-        }
-        case 'axmodel':{
-            return db.subModel
-        }
-        case 'role': {
-            return matcherArg.role ?? 'role'
-        }
-        case 'jbtoggled':{
-            return db.jailbreakToggle ? '1' : '0'
-        }
-        case 'random':{
-            return Math.random().toString()
-        }
-    }
-    const arra = p1.split("::")
-    if(arra.length > 1){
-        const v = arra[1]
-        switch(arra[0]){
-            case 'getvar':{
-                const d = matcherArg.var ?? getVarChat(chatID)
-                return d[v] ?? "[Null]" 
+            case 'example_dialogue':
+            case 'example_message':{
+                const argChara = chara
+                const achara = (argChara && typeof(argChara) !== 'string') ? argChara : (db.characters[get(selectedCharID)])
+                if(achara.type === 'group'){
+                    return ""
+                }
+                return achara.exampleMessage
             }
-            case 'calc':{
-                return calcString(v).toString()
+            case 'persona':
+            case 'user_persona':{
+                return db.personaPrompt
             }
-            case 'addvar':
-            case 'setvar':{
-                if(matcherArg.rmVar){
+            case 'main_prompt':
+            case 'system_prompt':{
+                return db.mainPrompt
+            }
+            case 'lorebook':
+            case 'world_info':{
+                const argChara = chara
+                const achara = (argChara && typeof(argChara) !== 'string') ? argChara : (db.characters[get(selectedCharID)])
+                const selchar = db.characters[get(selectedCharID)]
+                const chat = selchar.chats[selchar.chatPage]
+                const characterLore = (achara.type === 'group') ? [] : (achara.globalLore ?? [])
+                const chatLore = chat.localLore ?? []
+                const fullLore = characterLore.concat(chatLore.concat(getModuleLorebooks()))
+                return fullLore.map((f) => {
+                    return JSON.stringify(f)
+                }).join("§\n")
+            }
+            case 'history':
+            case 'messages':{
+                const selchar = db.characters[get(selectedCharID)]
+                const chat = selchar.chats[selchar.chatPage]
+                return chat.message.map((f) => {
+                    return f.role + ': ' + f.data
+                }).join("§\n")
+            }
+            case 'ujb':
+            case 'global_note':
+            case 'system_note':{
+                return db.globalNote
+            }
+            case 'chat_index':{
+                return chatID.toString() 
+            }
+            case 'blank':
+            case 'none':{
+                return ''
+            }
+            case 'message_time':{
+                if(matcherArg.tokenizeAccurate){
+                    return `00:00:00`
+                }
+                if(chatID === -1){
+                    return "[Cannot get time]"
+                }
+    
+                const selchar = db.characters[get(selectedCharID)]
+                const chat = selchar.chats[selchar.chatPage]
+                const message = chat.message[chatID]
+                if(!message.time){
+                    return "[Cannot get time, message was sent in older version]"
+                }
+                const date = new Date(message.time)
+                //output time in format like 10:30 AM
+                return date.toLocaleTimeString()
+            }
+            case 'message_date':{
+                if(matcherArg.tokenizeAccurate){
+                    return `00:00:00`
+                }
+                if(chatID === -1){
+                    return "[Cannot get time]"
+                }
+                const selchar = db.characters[get(selectedCharID)]
+                const chat = selchar.chats[selchar.chatPage]
+                const message = chat.message[chatID]
+                if(!message.time){
+                    return "[Cannot get time, message was sent in older version]"
+                }
+                const date = new Date(message.time)
+                //output date in format like Aug 23, 2021
+                return date.toLocaleDateString()
+            }
+            case 'time':{
+                const now = new Date()
+                return `${now.getHours()}:${now.getMinutes()}:${now.getSeconds()}`
+            }
+            case 'date':{
+                const now = new Date()
+                return `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`
+            }
+            case 'isotime':{
+                const now = new Date()
+                return `${now.getUTCHours()}:${now.getUTCMinutes()}:${now.getUTCSeconds()}`
+            }
+            case 'isodate':{
+                const now = new Date()
+                return `${now.getUTCFullYear()}-${now.getUTCMonth() + 1}-${now.getUTCDate()}`
+            }
+            case 'idle_duration':{
+                if(matcherArg.tokenizeAccurate){
+                    return `00:00:00`
+                }
+                if(chatID === -1){
+                    return "[Cannot get time]"
+                }
+                const selchar = db.characters[get(selectedCharID)]
+                const chat = selchar.chats[selchar.chatPage]
+                
+                //get latest user message
+                let pointer = chatID
+                let pointerMode: 'findLast'|'findSecondLast' = 'findLast'
+                let message:Message
+                let previous_message:Message
+                while(pointer >= 0){
+                    if(chat.message[pointer].role === 'user'){
+                        if(pointerMode === 'findLast'){
+                            message = chat.message[pointer]
+                            pointerMode = 'findSecondLast'
+                        }
+                        else{
+                            previous_message = chat.message[pointer]
+                            break
+                        }
+                    }
+                    pointer--
+                }
+    
+                if(!message){
+                    return '[No user message found]'
+                }
+    
+                if(!previous_message){
+                    return '[No previous user message found]'
+                }
+                if(!message.time){
+                    return "[Cannot get time, message was sent in older version]"
+                }
+                if(!previous_message.time){
+                    return "[Cannot get time, previous message was sent in older version]"
+                }
+    
+                let duration = message.time - previous_message.time
+                //output time in format like 10:30:00
+                let seconds = Math.floor(duration / 1000)
+                let minutes = Math.floor(seconds / 60)
+                let hours = Math.floor(minutes / 60)
+                seconds = seconds % 60
+                minutes = minutes % 60
+                //output, like 1:30:00
+                return hours.toString() + ':' + minutes.toString().padStart(2,'0') + ':' + seconds.toString().padStart(2,'0')
+            }
+            case 'br':
+            case 'newline':{
+                return '\n'
+            }
+            case 'model':{
+                return db.aiModel
+            }
+            case 'axmodel':{
+                return db.subModel
+            }
+            case 'role': {
+                return matcherArg.role ?? 'role'
+            }
+            case 'jbtoggled':{
+                return db.jailbreakToggle ? '1' : '0'
+            }
+            case 'random':{
+                return Math.random().toString()
+            }
+            case 'maxcontext':{
+                return db.maxContext.toString()
+            }
+            case 'lastmessage':{
+                const selchar = db.characters[get(selectedCharID)]
+                if(!selchar){
                     return ''
                 }
-                break
+                const chat = selchar.chats[selchar.chatPage]
+                return chat.message[chat.message.length - 1].data
             }
-            case 'button':{
-                return `<button style="padding" x-risu-prompt="${arra[2]}">${arra[1]}</button>`
-            }
-            case 'risu':{
-                return `<img src="/logo2.png" style="height:${v || 45}px;width:${v || 45}px" />`
-            }
-            case 'equal':{
-                return (arra[1] === arra[2]) ? '1' : '0'
-            }
-            case 'not_equal':
-            case 'notequal':{
-                return (arra[1] !== arra[2]) ? '1' : '0'
-            }
-            case 'greater':{
-                return (Number(arra[1]) > Number(arra[2])) ? '1' : '0'
-            }
-            case 'less':{
-                return (Number(arra[1]) < Number(arra[2])) ? '1' : '0'
-            }
-            case 'greater_equal':
-            case 'greaterequal':{
-                return (Number(arra[1]) >= Number(arra[2])) ? '1' : '0'
-            }
-            case 'less_equal':
-            case 'lessequal':{
-                return (Number(arra[1]) <= Number(arra[2])) ? '1' : '0'
-            }
-            case 'and':{
-                return (Number(arra[1]) && Number(arra[2])) ? '1' : '0'
-            }
-            case 'or':{
-                return (Number(arra[1]) || Number(arra[2])) ? '1' : '0'
-            }
-            case 'not':{
-                return (Number(arra[1]) === 0) ? '1' : '0'
-            }
-            case 'file':{
-                if(matcherArg.displaying){
-                    return `<br><div class="risu-file">${arra[1]}</div><br>`
+            case 'lastmessageid':
+            case 'lastmessageindex':{
+                const selchar = db.characters[get(selectedCharID)]
+                if(!selchar){
+                    return ''
                 }
-                return Buffer.from(arra[2], 'base64').toString('utf-8') 
+                const chat = selchar.chats[selchar.chatPage]
+                return chat.message.length - 1
             }
-            case 'startswith':{
-                return arra[1].startsWith(arra[2]) ? '1' : '0'
+            case 'emotionlist':{
+                const selchar = db.characters[get(selectedCharID)]
+                if(!selchar){
+                    return ''
+                }
+                return selchar.emotionImages?.map((f) => {
+                    return f[0]
+                })?.join('§') ?? ''
             }
-            case 'endswith':{
-                return arra[1].endsWith(arra[2]) ? '1' : '0'
-            }
-            case 'contains':{
-                return arra[1].includes(arra[2]) ? '1' : '0'
-            }
-            case 'replace':{
-                return arra[1].replaceAll(arra[2], arra[3])
-            }
-            case 'split':{
-                return arra[1].split(arra[2]).join('§')
-            }
-            case 'join':{
-                return arra[1].split('§').join(arra[2])
-            }
-            case 'length':{
-                return arra[1].length.toString()
-            }
-            case 'arraylength':
-            case 'array_length':{
-                return arra[1].split('§').length.toString()
-            }
-            case 'lower':{
-                return arra[1].toLocaleLowerCase()
-            }
-            case 'upper':{
-                return arra[1].toLocaleUpperCase()
-            }
-            case 'capitalize':{
-                return arra[1].charAt(0).toUpperCase() + arra[1].slice(1)
-            }
-            case 'round':{
-                return Math.round(Number(arra[1])).toString()
-            }
-            case 'floor':{
-                return Math.floor(Number(arra[1])).toString()
-            }
-            case 'ceil':{
-                return Math.ceil(Number(arra[1])).toString()
-            }
-            case 'abs':{
-                return Math.abs(Number(arra[1])).toString()
+            case 'assetlist':{
+                const selchar = db.characters[get(selectedCharID)]
+                if(!selchar || selchar.type === 'group'){
+                    return ''
+                }
+                return selchar.additionalAssets?.map((f) => {
+                    return f[0]
+                })?.join('§') ?? ''
             }
         }
+        const arra = p1.split("::")
+        if(arra.length > 1){
+            const v = arra[1]
+            switch(arra[0]){
+                case 'getvar':{
+                    return getChatVar(v)
+                }
+                case 'calc':{
+                    return calcString(v).toString()
+                }
+                case 'addvar':{
+                    if(matcherArg.rmVar){
+                        return ''
+                    }
+                    if(matcherArg.runVar){
+                        setChatVar(v, (Number(getChatVar(v)) + Number(arra[2])).toString())
+                        return ''
+                    }
+                    return null
+                }
+                case 'setvar':{
+                    if(matcherArg.rmVar){
+                        return ''
+                    }
+                    if(matcherArg.runVar){
+                        setChatVar(v, arra[2])
+                        return ''
+                    }
+                    return null
+                }
+                case 'button':{
+                    return `<button class="button-default" risu-trigger="${arra[2]}">${arra[1]}</button>`
+                }
+                case 'risu':{
+                    return `<img src="/logo2.png" style="height:${v || 45}px;width:${v || 45}px" />`
+                }
+                case 'equal':{
+                    return (arra[1] === arra[2]) ? '1' : '0'
+                }
+                case 'not_equal':
+                case 'notequal':{
+                    return (arra[1] !== arra[2]) ? '1' : '0'
+                }
+                case 'greater':{
+                    return (Number(arra[1]) > Number(arra[2])) ? '1' : '0'
+                }
+                case 'less':{
+                    return (Number(arra[1]) < Number(arra[2])) ? '1' : '0'
+                }
+                case 'greater_equal':
+                case 'greaterequal':{
+                    return (Number(arra[1]) >= Number(arra[2])) ? '1' : '0'
+                }
+                case 'less_equal':
+                case 'lessequal':{
+                    return (Number(arra[1]) <= Number(arra[2])) ? '1' : '0'
+                }
+                case 'and':{
+                    return arra[1] === '1' && arra[2] === '1' ? '1' : '0'
+                }
+                case 'or':{
+                    return arra[1] === '1' || arra[2] === '1' ? '1' : '0'
+                }
+                case 'not':{
+                    return arra[1] === '1' ? '0' : '1'
+                }
+                case 'file':{
+                    if(matcherArg.displaying){
+                        return `<br><div class="risu-file">${arra[1]}</div><br>`
+                    }
+                    return Buffer.from(arra[2], 'base64').toString('utf-8') 
+                }
+                case 'startswith':{
+                    return arra[1].startsWith(arra[2]) ? '1' : '0'
+                }
+                case 'endswith':{
+                    return arra[1].endsWith(arra[2]) ? '1' : '0'
+                }
+                case 'contains':{
+                    return arra[1].includes(arra[2]) ? '1' : '0'
+                }
+                case 'replace':{
+                    return arra[1].replaceAll(arra[2], arra[3])
+                }
+                case 'split':{
+                    return arra[1].split(arra[2]).join('§')
+                }
+                case 'join':{
+                    return arra[1].split('§').join(arra[2])
+                }
+                case 'spread':{
+                    return arra[1].split('§').join('::')
+                }
+                case 'trim':{
+                    return arra[1].trim()
+                }
+                case 'length':{
+                    return arra[1].length.toString()
+                }
+                case 'arraylength':
+                case 'array_length':{
+                    return arra[1].split('§').length.toString()
+                }
+                case 'lower':{
+                    return arra[1].toLocaleLowerCase()
+                }
+                case 'upper':{
+                    return arra[1].toLocaleUpperCase()
+                }
+                case 'capitalize':{
+                    return arra[1].charAt(0).toUpperCase() + arra[1].slice(1)
+                }
+                case 'round':{
+                    return Math.round(Number(arra[1])).toString()
+                }
+                case 'floor':{
+                    return Math.floor(Number(arra[1])).toString()
+                }
+                case 'ceil':{
+                    return Math.ceil(Number(arra[1])).toString()
+                }
+                case 'abs':{
+                    return Math.abs(Number(arra[1])).toString()
+                }
+                case 'remaind':{
+                    return (Number(arra[1]) % Number(arra[2])).toString()
+                }
+                case 'previous_chat_log':{
+                    const selchar = db.characters[get(selectedCharID)]
+                    const chat = selchar?.chats?.[selchar.chatPage]
+                    return chat?.message[chatID - 1]?.data ?? 'Out of range'
+    
+                }
+                case 'tonumber':{
+                    return arra[1].split('').filter((v) => {
+                        return !isNaN(Number(v)) || v === '.'
+                    }).join('')
+                }
+                case 'pow':{
+                    return Math.pow(Number(arra[1]), Number(arra[2])).toString()
+                }
+                case 'arrayelement':
+                case 'array_element':{
+                    return arra[1].split('§')[Number(arra[2])]
+                }
+                case 'arrayshift':
+                case 'array_shift':{
+                    const arr = arra[1].split('§')
+                    arr.shift()
+                    return arr.join('§')
+                }
+                case 'arraypop':
+                case 'array_pop':{
+                    const arr = arra[1].split('§')
+                    arr.pop()
+                    return arr.join('§')
+                }
+                case 'arraypush':
+                case 'array_push':{
+                    return arra[1] + '§' + arra[2]
+                }
+                case 'arraysplice':
+                case 'array_splice':{
+                    const arr = arra[1].split('§')
+                    arr.splice(Number(arra[2]), Number(arra[3]), arra[4])
+                    return arr.join('§')
+                }
+                case 'makearray':
+                case 'array':
+                case 'a':
+                case 'make_array':{
+                    return arra.slice(1).join('§')
+                }
+                case 'history':
+                case 'messages':{
+                    const selchar = db.characters[get(selectedCharID)]
+                    const chat = selchar.chats[selchar.chatPage]
+                    return chat.message.map((f) => {
+                        let data = ''
+                        if(arra.includes('role')){
+                            data += f.role + ': '
+                        }
+                        data += f.data
+                        return data
+                    }).join("§\n")
+                }
+                case 'range':{
+                    const arr = arra[1].split('§')
+                    const start = arr.length > 1 ? Number(arr[0]) : 0
+                    const end = arr.length > 1 ? Number(arr[1]) : Number(arr[0])
+                    const step = arr.length > 2 ? Number(arr[2]) : 1
+                    let out = ''
+                    for(let i=start;i<end;i+=step){
+                        out += i.toString()
+                        if(i + step < end){
+                            out += '§'
+                        }
+                    }
+                    return out
+                }
+            }
+        }
+        if(p1.startsWith('random')){
+            if(p1.startsWith('random::')){
+                const randomIndex = Math.floor(Math.random() * (arra.length - 1)) + 1
+                if(matcherArg.tokenizeAccurate){
+                    return arra[0]
+                }
+                return arra[randomIndex]
+            }
+            else{
+                const arr = p1.split(/\:|\,/g)
+                const randomIndex = Math.floor(Math.random() * (arr.length - 1)) + 1
+                if(matcherArg.tokenizeAccurate){
+                    return arra[0]
+                }
+                return arr[randomIndex]
+            }
+        }
+        if(p1.startsWith('pick')){
+            const selchar = db.characters[get(selectedCharID)]
+            const rand = sfc32(uuidtoNumber(selchar.chaId), chatID, uuidtoNumber(selchar.chaId), chatID)
+            if(p1.startsWith('pick::')){
+                const randomIndex = Math.floor(rand() * (arra.length - 1)) + 1
+                if(matcherArg.tokenizeAccurate){
+                    return arra[0]
+                }
+                return arra[randomIndex]
+            }
+            else{
+                const arr = p1.split(/\:|\,/g)
+                const randomIndex = Math.floor(rand() * (arr.length - 1)) + 1
+                if(matcherArg.tokenizeAccurate){
+                    return arra[0]
+                }
+                return arr[randomIndex]
+            }
+        }
+        if(p1.startsWith('roll')){
+            const arr = p1.split(/\:|\ /g)
+            let ina = arr.at(-1)
+    
+            if(ina.startsWith('d')){
+                ina = ina.substring(1)
+            }
+    
+            const maxRoll = parseInt(ina)
+            if(isNaN(maxRoll)){
+                return 'NaN'
+            }
+            return (Math.floor(Math.random() * maxRoll) + 1).toString()
+        }
+        if(p1.startsWith('datetimeformat')){
+            const date = new Date()
+            let main = p1.substring("datetimeformat".length + 1)
+            if(!main){
+                return ''
+            }
+            if(main.startsWith(':')){
+                main = main.substring(1)
+            }
+            return main
+                .replace(/YYYY/g, date.getFullYear().toString())
+                .replace(/YY/g, date.getFullYear().toString().substring(2))
+                .replace(/MM?/g, (date.getMonth() + 1).toString().padStart(2, '0'))
+                .replace(/DD?/g, date.getDate().toString().padStart(2, '0'))
+                .replace(/DDDD?/g, (date.getDay() + (date.getMonth() * 30)).toString())
+                .replace(/HH?/g, date.getHours().toString().padStart(2, '0'))
+                .replace(/hh?/g, (date.getHours() % 12).toString().padStart(2, '0'))
+                .replace(/mm?/g, date.getMinutes().toString().padStart(2, '0'))
+                .replace(/ss?/g, date.getSeconds().toString().padStart(2, '0'))
+                .replace(/A/g, date.getHours() >= 12 ? 'PM' : 'AM')
+                .replace(/MMMM?/g, Intl.DateTimeFormat('en', { month: 'long' }).format(date))
+        }
+        return null        
+    } catch (error) {
+        return null   
     }
-    if(p1.startsWith('random')){
-        if(p1.startsWith('random::')){
-            const randomIndex = Math.floor(Math.random() * (arra.length - 1)) + 1
-            if(matcherArg.tokenizeAccurate){
-                return arra[0]
-            }
-            return arra[randomIndex]
-        }
-        else{
-            const arr = p1.split(/\:|\,/g)
-            const randomIndex = Math.floor(Math.random() * (arr.length - 1)) + 1
-            if(matcherArg.tokenizeAccurate){
-                return arra[0]
-            }
-            return arr[randomIndex]
-        }
-    }
-    if(p1.startsWith('roll')){
-        const arr = p1.split(/\:|\ /g)
-        let ina = arr.at(-1)
-
-        if(ina.startsWith('d')){
-            ina = ina.substring(1)
-        }
-
-        const maxRoll = parseInt(ina)
-        if(isNaN(maxRoll)){
-            return 'NaN'
-        }
-        return (Math.floor(Math.random() * maxRoll) + 1).toString()
-    }
-    return null
 }
 
 const smMatcher = (p1:string,matcherArg:matcherArg) => {
@@ -845,30 +1042,47 @@ const legacyBlockMatcher = (p1:string,matcherArg:matcherArg) => {
     return null
 }
 
-type blockMatch = 'ignore'|'parse'|'nothing'
+type blockMatch = 'ignore'|'parse'|'nothing'|'parse-pure'|'pure'|'each'
 
 
-function blockStartMatcher(p1:string,matcherArg:matcherArg):blockMatch{
-    if(p1.startsWith('#if')){
-        const statement = p1.split(" ", 2)
+function blockStartMatcher(p1:string,matcherArg:matcherArg):{type:blockMatch,type2?:string}{
+    if(p1.startsWith('#if') || p1.startsWith('#if_pure ')){
+        const statement = p1.split(' ', 2)
         const state = statement[1]
         if(state === 'true' || state === '1'){
-            return 'parse'
+            return {type:p1.startsWith('#if_pure') ? 'parse-pure' : 'parse'}
         }
-        return 'ignore'
+        return {type:'ignore'}
     }
-    return 'nothing'
+    if(p1 === '#pure'){
+        return {type:'pure'}
+    }
+    if(p1.startsWith('#each')){
+        return {type:'each',type2:p1.substring(5).trim()}
+    }
+    return {type:'nothing'}
 }
 
-function blockEndMatcher(p1:string,type:blockMatch,matcherArg:matcherArg):string{
-    if(type === 'ignore'){
-        return ''
-    }
-    if(type === 'parse'){
-        return p1
+function trimLines(p1:string){
+    return p1.split('\n').map((v) => {
+        return v.trimStart()
+    }).join('\n').trim()
+}
 
+function blockEndMatcher(p1:string,type:{type:blockMatch,type2?:string},matcherArg:matcherArg):string{
+    switch(type.type){
+        case 'pure':
+        case 'parse-pure':{
+            return p1
+        }
+        case 'parse':
+        case 'each':{
+            return trimLines(p1)
+        }
+        default:{
+            return ''
+        }
     }
-    return ''
 }
 
 export function risuChatParser(da:string, arg:{
@@ -881,6 +1095,7 @@ export function risuChatParser(da:string, arg:{
     consistantChar?:boolean
     visualize?:boolean,
     role?:string
+    runVar?:boolean
 } = {}):string{
     const chatID = arg.chatID ?? -1
     const db = arg.db ?? get(DataBase)
@@ -911,9 +1126,9 @@ export function risuChatParser(da:string, arg:{
     let pointer = 0;
     let nested:string[] = [""]
     let stackType = new Uint8Array(512)
-    let pureMode = false
-    let pureModeType:''|'pureSyntax'|'block' = ''
-    let blockType:blockMatch = 'nothing'
+    let pureModeNest:Map<number,boolean> = new Map()
+    let pureModeNestType:Map<number,string> = new Map()
+    let blockNestType:Map<number,{type:blockMatch,type2?:string}> = new Map()
     let commentMode = false
     let commentLatest:string[] = [""]
     let commentV = new Uint8Array(512)
@@ -926,9 +1141,20 @@ export function risuChatParser(da:string, arg:{
         var: arg.var ?? null,
         tokenizeAccurate: arg.tokenizeAccurate ?? false,
         displaying: arg.visualize ?? false,
-        role: arg.role
+        role: arg.role,
+        runVar: arg.runVar ?? false,
     }
-    let pef = performance.now()
+
+
+    const isPureMode = () => {
+        return pureModeNest.size > 0
+    }
+    const pureModeType = () => {
+        if(pureModeNest.size === 0){
+            return ''
+        }
+        return pureModeNestType.get(nested.length) ?? [...pureModeNestType.values()].at(-1) ?? ''
+    }
     while(pointer < da.length){
         switch(da[pointer]){
             case '{':{
@@ -966,41 +1192,64 @@ export function risuChatParser(da:string, arg:{
                 pointer++
                 const dat = nested.shift()
                 if(dat.startsWith('#')){
-                    if(pureMode){
+                    if(isPureMode()){
                         nested[0] += `{{${dat}}}`
+                        nested.unshift('')
+                        stackType[nested.length] = 6
+                        break
                     }
                     const matchResult = blockStartMatcher(dat, matcherObj)
-                    if(matchResult === 'nothing'){
+                    if(matchResult.type === 'nothing'){
+                        nested[0] += `{{${dat}}}`
                         break
                     }
                     else{
-                        if(matchResult !== 'parse'){
-                            pureMode = true
-                            pureModeType = 'block'
-                        }
-                        blockType = matchResult
                         nested.unshift('')
                         stackType[nested.length] = 5
+                        blockNestType.set(nested.length, matchResult)
+                        if(matchResult.type === 'ignore' || matchResult.type === 'pure' || matchResult.type === 'each'){
+                            pureModeNest.set(nested.length, true)
+                            pureModeNestType.set(nested.length, "block")
+                        }
                         break
                     }
                 }
                 if(dat.startsWith('/')){
                     if(stackType[nested.length] === 5){
-                        const dat2 = nested.shift()
-                        if(pureMode && pureModeType === 'block'){
-                            pureMode = false
-                            pureModeType = ''
+                        const blockType = blockNestType.get(nested.length)
+                        if(blockType.type === 'ignore' || blockType.type === 'pure' || blockType.type === 'each'){
+                            pureModeNest.delete(nested.length)
+                            pureModeNestType.delete(nested.length)
                         }
+                        blockNestType.delete(nested.length)
+                        const dat2 = nested.shift()
                         const matchResult = blockEndMatcher(dat2.trim(), blockType, matcherObj)
+                        if(blockType.type === 'each'){
+                            const subind = blockType.type2.lastIndexOf(' ')
+                            const sub = blockType.type2.substring(subind + 1)
+                            const array = blockType.type2.substring(0, subind).split('§')
+                            let added = ''
+                            for(let i = 0;i < array.length;i++){
+                                const res = matchResult.replaceAll(`{{slot::${sub}}}`, array[i])
+                                added += res
+                            }
+                            da = da.substring(0, pointer + 1) + added.trim() + da.substring(pointer + 1)
+                            break
+                        }
                         if(matchResult === ''){
                             break
                         }
                         nested[0] += matchResult
-                        blockType = 'nothing'
+                        break
+                    }
+                    if(stackType[nested.length] === 6){
+                        console.log(dat)
+                        const sft = nested.shift()
+                        nested[0] += sft + `{{${dat}}}`
                         break
                     }
                 }
-                const mc = (pureMode) ? null :matcher(dat, matcherObj)
+                const mc = isPureMode() ? null :matcher(dat, matcherObj)
                 nested[0] += mc ?? `{{${dat}}}`
                 break
             }
@@ -1009,27 +1258,15 @@ export function risuChatParser(da:string, arg:{
                     break
                 }
                 const dat = nested.shift()
-                if(pureMode && pureModeType !== 'pureSyntax' && pureModeType !== ''){
+                if(isPureMode() && pureModeType() !== 'pureSyntax' && pureModeType() !== ''){
                     nested[0] += `<${dat}>`
                     break
                 }
                 switch(dat){
-                    case 'Pure':{
-                        pureMode = true
-                        pureModeType = 'pureSyntax'
-                        break
-                    }
-                    case '/Pure':{
-                        if(pureModeType === 'pureSyntax'){
-                            pureMode = false
-                            pureModeType = ''
-                        }
-                        else{
-                            nested[0] += `<${dat}>`
+                    case 'Comment':{
+                        if(arg.runVar){
                             break
                         }
-                    }
-                    case 'Comment':{
                         if(!commentMode){
                             thinkingMode = false
                             commentMode = true
@@ -1078,7 +1315,7 @@ export function risuChatParser(da:string, arg:{
                         break
                     }
                     default:{
-                        const mc = (pureMode) ? null : smMatcher(dat, matcherObj)
+                        const mc = isPureMode() ? null : smMatcher(dat, matcherObj)
                         nested[0] += mc ?? `<${dat}>`
                         break
                     }
@@ -1112,87 +1349,26 @@ export function risuChatParser(da:string, arg:{
     return nested[0] + result
 }
 
-export function getVarChat(targetIndex = -1, chara:character|groupChat = null){
+
+export function getChatVar(key:string){
     const db = get(DataBase)
-    const selchar = chara ?? db.characters[get(selectedCharID)]
-    const chat = selchar.chats[selchar.chatPage]
-    let i =0;
-    if(targetIndex === -1 || targetIndex >= chat.message.length){
-        targetIndex = chat.message.length - 1
-    }
-    let vars:{[key:string]:string} = {}
-    let rules:{
-        key:string
-        rule:string
-        arg:string
-    }[] = []
-    const fm = selchar.firstMsgIndex === -1 ? selchar.firstMessage : selchar.alternateGreetings[selchar.firstMsgIndex]
-    const rg = /(\{\{setvar::(.+?)::(.+?)\}\})/gu
-    const rg2 = /(\{\{addvar::(.+?)::(.+?)\}\})/gu
-    const rg3 = /(\{\{varrule_(.+?)::(.+?)::(.+?)\}\})/gu
-    function process(text:string){
-        const m = text.matchAll(rg)
-        for(const a of m){
-            if(a.length === 4){
-                vars[a[2]] = a[3]
-            }
-        }
-        const m2 = text.matchAll(rg2)
-        for(const a of m2){
-            if(a.length === 4){
-                vars[a[2]] = (parseInt(vars[a[2]]) + parseInt(a[3])).toString()
-            }
-        }
-        const m3 = text.matchAll(rg3)
-        for(const a of m3){
-            if(a.length === 5){
-                rules.push({
-                    key: a[3],
-                    rule: a[2],
-                    arg: a[4]
-                })
-            }
-        }
-    }
-    process(fm)
-    while( i <= targetIndex ){
-        process(chat.message[i].data)
-        i += 1
-    }
+    const selectedChar = get(selectedCharID)
+    const char = db.characters[selectedChar]
+    const chat = char.chats[char.chatPage]
+    chat.scriptstate = chat.scriptstate ?? {}
+    return (chat.scriptstate['$' + key])?.toString() ?? 'null'
+}
 
-    for(const rule of rules){
-        if(vars[rule.key] === undefined){
-            continue
-        }
-        switch(rule.rule){
-            case "max":{
-                if(parseInt(vars[rule.key]) > parseInt(rule.arg)){
-                    vars[rule.key] = rule.arg
-                }
-                break
-            }
-            case "min":{
-                if(parseInt(vars[rule.key]) < parseInt(rule.arg)){
-                    vars[rule.key] = rule.arg
-                }
-                break
-            }
-            case 'overflow':{
-                const exArg = rule.arg.split(":")
-                let rv = parseInt(vars[rule.key])
-                const val = parseInt(exArg[0])
-                const tg = exArg[1]
-
-                if(isNaN(val) || isNaN(rv)){
-                    break
-                }
-
-                vars[tg] = (Math.floor(rv / val)).toString()
-                vars[rule.key] = (Math.floor(rv % val)).toString()
-            }
-        }
-    }
-    return vars
+export function setChatVar(key:string, value:string){
+    const db = get(DataBase)
+    const selectedChar = get(selectedCharID)
+    const char = db.characters[selectedChar]
+    const chat = char.chats[char.chatPage]
+    chat.scriptstate = chat.scriptstate ?? {}
+    chat.scriptstate['$' + key] = value
+    char.chats[char.chatPage] = chat
+    db.characters[selectedChar] = char
+    setDatabase(db)
 }
 
 

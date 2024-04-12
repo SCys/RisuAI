@@ -493,7 +493,7 @@
             }
         }}><PlusIcon /></button>
 
-        <span class="text-textcolor mt-4">{language.triggerScript} <Help key="regexScript"/></span>
+        <span class="text-textcolor mt-4">{language.triggerScript} <Help key="triggerScript"/></span>
         <TriggerList bind:value={currentChar.data.triggerscript} />
         <button class="font-medium cursor-pointer hover:text-green-500 mb-2" on:click={() => {
             if(currentChar.type === 'character'){
@@ -508,8 +508,10 @@
             }
         }}><PlusIcon /></button>
 
-        <span class="text-textcolor mt-4">{language.charjs} <Help key="charjs"/></span>
-        <TextAreaInput margin="both" autocomplete="off" bind:value={currentChar.data.virtualscript}></TextAreaInput>
+        {#if currentChar.data.virtualscript || $DataBase.showUnrecommended}
+            <span class="text-textcolor mt-4">{language.charjs} <Help key="charjs" unrecommended/></span>
+            <TextAreaInput margin="both" autocomplete="off" bind:value={currentChar.data.virtualscript}></TextAreaInput>
+        {/if}
     {/if}
 {:else if subMenu === 5}
     {#if currentChar.type === 'character'}
@@ -622,10 +624,10 @@
         {/if}
         {#if currentChar.data.ttsMode === 'huggingface'}
             <span class="text-textcolor">Model</span>
-            <TextInput additionalClass="mb-4 mt-2" bind:value={currentChar.data.hfTTS.model} />
+            <TextInput className="mb-4 mt-2" bind:value={currentChar.data.hfTTS.model} />
 
             <span class="text-textcolor">Language</span>
-            <TextInput additionalClass="mb-4 mt-2" bind:value={currentChar.data.hfTTS.language} placeholder="en" />
+            <TextInput className="mb-4 mt-2" bind:value={currentChar.data.hfTTS.language} placeholder="en" />
         {/if}
         {#if currentChar.data.ttsMode === 'vits'}
             {#if currentChar.data.vits}
@@ -691,8 +693,8 @@
 
         <span class="text-textcolor">{language.depthPrompt}</span>
         <div class="flex justify-center items-center">
-            <NumberInput size="sm" bind:value={currentChar.data.depth_prompt.depth} additionalClass="w-12"/>
-            <TextInput size="sm" bind:value={currentChar.data.depth_prompt.prompt} additionalClass="flex-1"/>
+            <NumberInput size="sm" bind:value={currentChar.data.depth_prompt.depth} className="w-12"/>
+            <TextInput size="sm" bind:value={currentChar.data.depth_prompt.prompt} className="flex-1"/>
         </div>
 
         <span class="text-textcolor mt-2">{language.altGreet}</span>
@@ -832,7 +834,13 @@
                 if(await alertTOS()){
                     openHubUpload = true                    
                 }
-            }} className="mt-2">{language.shareCloud}</Button>
+            }} className="mt-2">
+                {#if currentChar.data.realmId}
+                    {language.updateRealm}
+                {:else}
+                    {language.shareCloud}
+                {/if}
+            </Button>
         {/if}
 
         {#if openHubUpload}

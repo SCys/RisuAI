@@ -9,7 +9,7 @@ import { sleep } from "../util";
 import { createDeep } from "./deepai";
 import { hubURL } from "../characterCards";
 import { NovelAIBadWordIds, stringlizeNAIChat } from "./models/nai";
-import { strongBan, tokenizeNum } from "../tokenizer";
+import { strongBan, tokenize, tokenizeNum } from "../tokenizer";
 import { runGGUFModel } from "./models/local";
 import { risuChatParser } from "../parser";
 import { SignatureV4 } from "@smithy/signature-v4";
@@ -39,6 +39,7 @@ interface requestDataArgument{
     isGroupChat?:boolean
     useEmotion?:boolean
     continue?:boolean
+    chatId?:string
 }
 
 type requestDataResponse = {
@@ -101,7 +102,7 @@ interface OpenAITextContents {
 }
 
 interface OpenAIImageContents {
-    type: 'image'
+    type: 'image'|'image_url'
     image_url: {
         url: string
         detail: string
@@ -170,6 +171,8 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
         case 'mistral-small-latest':
         case 'mistral-medium-latest':
         case 'mistral-large-latest':
+        case 'gpt4_turbo_20240409':
+        case 'gpt4_turbo':
         case 'reverse_proxy':{
             let formatedChat:OpenAIChatExtra[] = []
             for(let i=0;i<formated.length;i++){
@@ -179,7 +182,7 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
                     let contents:OpenAIContents[] = []
                     for(let j=0;j<m.multimodals.length;j++){
                         contents.push({
-                            "type": "image",
+                            "type": "image_url",
                             "image_url": {
                                 "url": m.multimodals[j].base64,
                                 "detail": db.gptVisionQuality
@@ -360,6 +363,7 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
                         "Authorization": "Bearer " + db.mistralKey,
                     },
                     abortSignal,
+                    chatId: arg.chatId
                 })
     
                 const dat = res.data as any
@@ -412,6 +416,8 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
                     : requestModel === "gpt35_1106" ? 'gpt-3.5-turbo-1106'
                     : requestModel === 'gpt35_0301' ? 'gpt-3.5-turbo-0301'
                     : requestModel === 'gpt4_0314' ? 'gpt-4-0314'
+                    : requestModel === 'gpt4_turbo_20240409' ? 'gpt-4-turbo-2024-04-09'
+                    : requestModel === 'gpt4_turbo' ? 'gpt-4-turbo'
                     : (!requestModel) ? 'gpt-3.5-turbo'
                     : requestModel,
                 messages: formatedChat,
@@ -526,7 +532,8 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
                     body: JSON.stringify(body),
                     method: "POST",
                     headers: headers,
-                    signal: abortSignal
+                    signal: abortSignal,
+                    chatId: arg.chatId
                 })
 
                 if(da.status !== 200){
@@ -603,11 +610,52 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
                 }
             }
 
+            if(raiModel === 'reverse_proxy'){
+                const additionalParams = db.additionalParams
+                for(let i=0;i<additionalParams.length;i++){
+                    let key = additionalParams[i][0]
+                    let value = additionalParams[i][1]
+
+                    if(!key || !value){
+                        continue
+                    }
+
+                    if(value === '{{none}}'){
+                        if(key.startsWith('header::')){
+                            key = key.replace('header::', '')
+                            delete headers[key]
+                        }
+                        else{
+                            delete body[key]
+                        }
+                        continue
+                    }
+
+                    if(key.startsWith('header::')){
+                        key = key.replace('header::', '')
+                        headers[key] = value
+                    }
+                    else if(value.startsWith('json::')){
+                        value = value.replace('json::', '')
+                        try {
+                            body[key] = JSON.parse(value)                            
+                        } catch (error) {}
+                    }
+                    else if(isNaN(parseFloat(value))){
+                        body[key] = value
+                    }
+                    else{
+                        body[key] = parseFloat(value)
+                    }
+                }
+            }
+
             const res = await globalFetch(replacerURL, {
                 body: body,
                 headers: headers,
                 abortSignal,
-                useRisuToken:throughProxi
+                useRisuToken:throughProxi,
+                chatId: arg.chatId
             })
 
             const dat = res.data as any
@@ -727,7 +775,8 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
                 headers: {
                     "Authorization": "Bearer " + db.novelai.token
                 },
-                abortSignal
+                abortSignal,
+                chatId: arg.chatId
             })
 
             if((!da.ok )|| (!da.data.output)){
@@ -775,8 +824,9 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
                 },
                 headers: {
                     "Content-Type": "application/json",
-                    "Authorization": "Bearer " + db.openAIKey
+                    "Authorization": "Bearer " + db.openAIKey,
                 },
+                chatId: arg.chatId
             });
 
             if(!response.ok){
@@ -883,7 +933,8 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
             const res = await globalFetch(blockingUrl, {
                 body: bodyTemplate,
                 headers: headers,
-                abortSignal
+                abortSignal,
+                chatId: arg.chatId
             })
             
             const dat = res.data as any
@@ -947,6 +998,7 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
 
             const response = await globalFetch(urlStr, {
                 body: bodyTemplate,
+                chatId: arg.chatId
             })
 
             if(!response.ok){
@@ -1024,7 +1076,8 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
                     "Content-Type": "application/json",
                     "Authorization": "Bearer " + db.google.accessToken
                 },
-                abortSignal
+                abortSignal,
+                chatId: arg.chatId
             })
             if(res.ok){
                 console.log(res.data)
@@ -1215,6 +1268,7 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
             const res = await globalFetch(url, {
                 headers: headers,
                 body: body,
+                chatId: arg.chatId
             })
 
             if(!res.ok){
@@ -1276,7 +1330,8 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
                 headers: {
                     "content-type": "application/json",
                 },
-                abortSignal
+                abortSignal,
+                chatId: arg.chatId
             })
 
             if(!da.ok){
@@ -1329,7 +1384,8 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
             const response = await globalFetch(api_server_url + '/api', {
                 method: 'POST',
                 headers: headers,
-                body: send_body
+                body: send_body,
+                chatId: arg.chatId
             });
 
             if(!response.ok){
@@ -1385,6 +1441,48 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
             return {
                 'type': 'success',
                 'result': result
+            }
+        }
+        case 'risullm-proto':{
+            const res = await globalFetch('https://sv.risuai.xyz/risullm', {
+                body: {
+                    messages: formated.map((v) => {
+                        if(v.role === 'system'){
+                            return {
+                                role: "user",
+                                content: "System: " + v.content
+                            }
+                        }
+                        if(v.role === 'function'){
+                            return {
+                                role: "user",
+                                content: "Function: " + v.content
+                            
+                            }
+                        }
+                        return {
+                            role: v.role,
+                            content: v.content
+                        }
+                    })
+                },
+                headers: {
+                    "X-Api-Key": db.proxyKey
+                }
+            })
+
+            const resp:string = res?.data?.response
+            
+            if(!resp){
+                return {
+                    type: 'fail',
+                    result: JSON.stringify(res.data)
+                }
+            }
+
+            return {
+                type: 'success',
+                result: resp.replace(/\\n/g, '\n')
             }
         }
         default:{     
@@ -1645,7 +1743,8 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
                         method: "POST",
                         body: params,
                         headers: signed.headers,
-                        plainFetchForce: true
+                        plainFetchForce: true,
+                        chatId: arg.chatId
                     })
 
                     if(!res.ok){
@@ -1677,7 +1776,8 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
                             "anthropic-version": "2023-06-01",
                             "accept": "application/json",
                         },
-                        method: "POST"
+                        method: "POST",
+                        chatId: arg.chatId
                     })
 
                     if(res.status !== 200){
@@ -1686,13 +1786,16 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
                             result: await textifyReadableStream(res.body)
                         }
                     }
+                    let rerequesting = false
+                    let breakError = ''
 
 
                     const stream = new ReadableStream<StreamResponseChunk>({
                         async start(controller){
                             let text = ''
+                            let reader = res.body.getReader()
                             const decoder = new TextDecoder()
-                            const parser = createParser((e) => {
+                            const parser = createParser(async (e) => {
                                 if(e.type === 'event'){
                                     switch(e.event){
                                         case 'content_block_delta': {
@@ -1706,6 +1809,42 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
                                         }
                                         case 'error': {
                                             if(e.data){
+                                                const errormsg:string = JSON.parse(e.data).error?.message
+                                                if(errormsg && errormsg.toLocaleLowerCase().includes('overload') && db.antiClaudeOverload){
+                                                    console.log('Overload detected, retrying...')
+                                                    reader.cancel()
+                                                    rerequesting = true
+                                                    await sleep(2000)
+                                                    body.max_tokens -= await tokenize(text)
+                                                    if(body.max_tokens < 0){
+                                                        body.max_tokens = 0
+                                                    }
+                                                    if(body.messages.at(-1)?.role !== 'assistant'){
+                                                        body.messages.push({
+                                                            role: 'assistant',
+                                                            content: ''
+                                                        })
+                                                    }
+                                                    body.messages[body.messages.length-1].content += text
+                                                    const res = await fetchNative(replacerURL, {
+                                                        body: JSON.stringify(body),
+                                                        headers: {
+                                                            "Content-Type": "application/json",
+                                                            "x-api-key": apiKey,
+                                                            "anthropic-version": "2023-06-01",
+                                                            "accept": "application/json",
+                                                        },
+                                                        method: "POST",
+                                                        chatId: arg.chatId
+                                                    })
+                                                    if(res.status !== 200){
+                                                        breakError = 'Error: ' + await textifyReadableStream(res.body)
+                                                        break
+                                                    }
+                                                    reader = res.body.getReader()
+                                                    rerequesting = false
+                                                    break
+                                                }
                                                 text += "Error:" + JSON.parse(e.data).error?.message
                                                 controller.enqueue({
                                                     "0": text
@@ -1716,13 +1855,29 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
                                     }
                                 }
                             })
-                            const reader = res.body.getReader()
                             while(true){
-                                const {done, value} = await reader.read()
-                                if(done){
-                                    break
+                                if(rerequesting){
+                                    if(breakError){
+                                        controller.enqueue({
+                                            "0": breakError
+                                        })
+                                        break
+                                    }
+                                    await sleep(1000)
+                                    continue
                                 }
-                                parser.feed(decoder.decode(value))
+                                try {
+                                    const {done, value} = await reader.read() 
+                                    if(done){
+                                        if(rerequesting){
+                                            continue
+                                        }
+                                        break
+                                    }
+                                    parser.feed(decoder.decode(value))                                   
+                                } catch (error) {
+                                    await sleep(1)
+                                }
                             }
                             controller.close()
                         },
@@ -1744,7 +1899,8 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
                         "anthropic-version": "2023-06-01",
                         "accept": "application/json"
                     },
-                    method: "POST"
+                    method: "POST",
+                    chatId: arg.chatId
                 })
 
                 if(!res.ok){
@@ -1906,7 +2062,8 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
                         method: "POST",
                         body: params,
                         headers: signed.headers,
-                        plainFetchForce: true
+                        plainFetchForce: true,
+                        chatId: arg.chatId
                     })
 
                       
@@ -1940,7 +2097,8 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
                         "anthropic-version": "2023-06-01",
                         "accept": "application/json"
                     },
-                    useRisuToken: aiModel === 'reverse_proxy'
+                    useRisuToken: aiModel === 'reverse_proxy',
+                    chatId: arg.chatId
                 })
 
                 if((!da.ok) || (da.data.error)){

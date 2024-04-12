@@ -1,11 +1,12 @@
 <script lang="ts">
 	import Suggestion from './Suggestion.svelte';
+	import AdvancedChatEditor from './AdvancedChatEditor.svelte';
     import { CameraIcon, DatabaseIcon, DicesIcon, GlobeIcon, ImagePlusIcon, LanguagesIcon, Laugh, MenuIcon, MicOffIcon, PackageIcon, RefreshCcwIcon, ReplyIcon, Send, StepForwardIcon } from "lucide-svelte";
     import { CurrentCharacter, CurrentChat, CurrentUsername, selectedCharID, CurrentUserIcon, CurrentShowMemoryLimit,CurrentSimpleCharacter } from "../../ts/stores";
     import Chat from "./Chat.svelte";
     import { DataBase, type Message, type character, type groupChat } from "../../ts/storage/database";
     import { getCharImage } from "../../ts/characters";
-    import { doingChat, sendChat } from "../../ts/process/index";
+    import { chatProcessStage, doingChat, sendChat } from "../../ts/process/index";
     import { findCharacterbyId, messageForm, sleep } from "../../ts/util";
     import { language } from "../../lang";
     import { isExpTranslator, translate } from "../../ts/translator/translator";
@@ -23,6 +24,7 @@
     import { PreUnreroll, Prereroll } from 'src/ts/process/prereroll';
     import { processMultiCommand } from 'src/ts/process/command';
     import { postChatFile } from 'src/ts/process/files/multisend';
+  import { getInlayImage } from 'src/ts/process/files/image';
 
     let messageInput:string = ''
     let messageInputTranslate:string = ''
@@ -35,6 +37,7 @@
     let doingChatInputTranslate = false
     let currentCharacter:character|groupChat = $CurrentCharacter
     let toggleStickers:boolean = false
+    let fileInput:string[] = []
     export let openModuleList = false
     export let openChatList:boolean = false 
 
@@ -65,6 +68,12 @@
             }
         }
 
+        if(fileInput.length > 0){
+            for(const file of fileInput){
+                messageInput += `{{inlay::${file}}}`
+            }
+            fileInput = []
+        }
 
         if(messageInput === ''){
             if($DataBase.characters[selectedChar].type !== 'group'){
@@ -365,7 +374,7 @@
                 mergedCanvas.remove();
             }
             alertNormal(language.screenshotSaved)
-            loadPages = 30   
+            loadPages = 10
         } catch (error) {
             console.error(error)
             alertError("Error while taking screenshot")
@@ -377,6 +386,7 @@
     }
 </script>
 <!-- svelte-ignore a11y-click-events-have-key-events -->
+<!-- svelte-ignore a11y-no-static-element-interactions -->
 <div class="w-full h-full" style={customStyle} on:click={() => {
     openMenu = false
 }}>
@@ -387,7 +397,7 @@
             //@ts-ignore  
             const scrolled = (e.target.scrollHeight - e.target.clientHeight + e.target.scrollTop)
             if(scrolled < 100 && $CurrentChat.message.length > loadPages){
-                loadPages += 30
+                loadPages += 15
             }
         }}>
             <div class="flex items-end mt-2 mb-2 w-full">
@@ -397,6 +407,8 @@
                             <Laugh/>
                     </div>    
                 {/if}
+
+                {#if !$DataBase.useAdvancedEditor}
                 <textarea class="text-textcolor p-2 min-w-0 bg-transparent input-text text-xl flex-grow ml-4 mr-2 border-darkbutton resize-none focus:bg-selected overflow-y-hidden overflow-x-hidden max-w-full"
                     bind:value={messageInput}
                     bind:this={inputEle}
@@ -415,12 +427,19 @@
                     on:input={()=>{updateInputSizeAll();updateInputTransateMessage(false)}}
                     style:height={inputHeight}
                 />
+                {:else}
+                <AdvancedChatEditor 
+                    bind:value={messageInput}
+                    bind:translate={messageInputTranslate}
+                    on:change={(e) => { updateInputTransateMessage(e.detail.translate);}}
+                 />
+                {/if}
 
                 
-                {#if $doingChat || doingChatInputTranslate}
+                {#if $doingChat || doingChatInputTranslate} 
                     <div
                         class="mr-2 bg-selected flex justify-center items-center text-gray-100 w-12 h-12 rounded-md hover:bg-green-500 transition-colors" on:click={abortChat}>
-                        <div class="loadmove" class:autoload={autoMode}>
+                        <div class="loadmove chat-process-stage-{$chatProcessStage}" class:autoload={autoMode}>
                         </div>
                     </div>
                 {:else}
@@ -435,8 +454,8 @@
                     class="mr-2 bg-textcolor2 flex justify-center items-center text-gray-100 w-12 h-12 rounded-md hover:bg-green-500 transition-colors"><MenuIcon />
                     </div>
             </div>
-            {#if $DataBase.useAutoTranslateInput}
-                <div class="flex items-center mt-2 mb-2 w-full">
+            {#if $DataBase.useAutoTranslateInput && !$DataBase.useAdvancedEditor}
+                <div class="flex items-center mt-2 mb-2">
                     <label for='messageInputTranslate' class="text-textcolor ml-4">
                         <LanguagesIcon />
                     </label>
@@ -460,6 +479,17 @@
                         style:height={inputTranslateHeight}
                     />
                 </div>
+            {/if}
+
+            {#if fileInput.length > 0}
+                <div class="flex items-center ml-4 flex-wrap p-2 m-2 border-darkborderc border rounded-md">
+                    {#each fileInput as file, i}
+                        {#await getInlayImage(file) then inlayImage}
+                            <img src={inlayImage.data} alt="Inlay" class="max-w-24 max-h-24">
+                        {/await}
+                    {/each}
+                </div>
+
             {/if}
             
             {#if toggleStickers}
@@ -501,6 +531,7 @@
                             isLastMemory={$CurrentChat.lastMemory === (chat.chatId ?? 'none') && $CurrentShowMemoryLimit}
                             character={$CurrentSimpleCharacter}
                             largePortrait={$CurrentCharacter.largePortrait}
+                            MessageGenerationInfo={chat.generationInfo}
                         />
                     {:else}
                         <Chat
@@ -514,6 +545,7 @@
                             isLastMemory={$CurrentChat.lastMemory === (chat.chatId ?? 'none') && $CurrentShowMemoryLimit}
                             character={chat.saying}
                             largePortrait={findCharacterbyId(chat.saying).largePortrait}
+                            MessageGenerationInfo={chat.generationInfo}
                         />
                     {/if}
                 {:else}
@@ -525,6 +557,7 @@
                         img={getCharImage($CurrentUserIcon, 'css')}
                         isLastMemory={$CurrentChat.lastMemory === (chat.chatId ?? 'none') && $CurrentShowMemoryLimit}
                         largePortrait={$DataBase.personas[$DataBase.selectedPersona].largePortrait}
+                        MessageGenerationInfo={chat.generationInfo}
                     />
                 {/if}
             {/each}
@@ -641,22 +674,20 @@
                         <span class="ml-2">{language.screenshot}</span>
                     </div>
 
-                    {#if $DataBase.inlayImage}
-                        <div class="flex items-center cursor-pointer hover:text-green-500 transition-colors" on:click={async () => {
-                            const res = await postChatFile(messageInput)
-                            if(res?.type === 'image'){
-                                messageInput += res.data
-                                updateInputSizeAll()
-                            }
-                            if(res?.type === 'text'){
-                                messageInput += `{{file::${res.name}::${res.data}}}`
-                                updateInputSizeAll()
-                            }
-                        }}>
-                            <ImagePlusIcon />
-                            <span class="ml-2">{language.postFile}</span>
-                        </div>
-                    {/if}
+                    <div class="flex items-center cursor-pointer hover:text-green-500 transition-colors" on:click={async () => {
+                        const res = await postChatFile(messageInput)
+                        if(res?.type === 'image'){
+                            fileInput.push(res.data)
+                            updateInputSizeAll()
+                        }
+                        if(res?.type === 'text'){
+                            messageInput += `{{file::${res.name}::${res.data}}}`
+                            updateInputSizeAll()
+                        }
+                    }}>
+                        <ImagePlusIcon />
+                        <span class="ml-2">{language.postFile}</span>
+                    </div>
 
 
                     <div class={"flex items-center cursor-pointer "+ ($DataBase.useAutoSuggestions ? 'text-green-500':'lg:hover:text-green-500')} on:click={async () => {
@@ -698,6 +729,28 @@
         height: 1rem;
         border-top: 0.4rem solid var(--risu-theme-borderc);
         border-left: 0.4rem solid var(--risu-theme-borderc);
+        /* transition colors */
+        transition: border-color 0.5s;
+    }
+
+    .chat-process-stage-1{
+        border-top: 0.4rem solid #60a5fa;
+        border-left: 0.4rem solid #60a5fa;
+    }
+
+    .chat-process-stage-2{
+        border-top: 0.4rem solid #db2777;
+        border-left: 0.4rem solid #db2777;
+    }
+
+    .chat-process-stage-3{
+        border-top: 0.4rem solid #34d399;
+        border-left: 0.4rem solid #34d399;
+    }
+
+    .chat-process-stage-4{
+        border-top: 0.4rem solid #8b5cf6;
+        border-left: 0.4rem solid #8b5cf6;
     }
 
     .autoload{

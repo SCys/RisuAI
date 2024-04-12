@@ -299,7 +299,7 @@ export const languageChinese = {
 	"loadDataFromAccount": "从帐户加载数据",
 	"saveCurrentDataToAccount": "将当前数据保存到帐户",
 	"chatAssumed": "",
-	"proxyAPIKey": "代理API密钥/密码",
+	"proxyAPIKey": "API密钥/密码",
 	"proxyRequestModel": "代理请求模型",
 	"officialWiki": "官方Wiki",
 	"officialWikiDesc": "RisuAI的官方Wiki，随意查看。",
@@ -391,6 +391,8 @@ export const languageChinese = {
 	"translatorType": "翻译类型",
 	"deeplKey": "deepl API密钥",
 	"deeplFreeKey": "deepl 免费 API密钥",
+	"deeplXUrl": "deepLX URL",
+	"deeplXToken": "deepLX Token",
 	"exportPersona": "导出角色",
 	"importPersona": "导入角色",
 	"export": "导出",
@@ -403,4 +405,5 @@ export const languageChinese = {
 	"appendNameNAI": "在NAI上附加名称",
 	module: "模块",
     modules: "模块",
+    useAdvancedEditor: "使用高级编辑器",
 }

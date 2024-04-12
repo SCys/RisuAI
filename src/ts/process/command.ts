@@ -1,7 +1,7 @@
 import { get } from "svelte/store";
 import { DataBase, setDatabase } from "../storage/database";
 import { selectedCharID } from "../stores";
-import { alertInput, alertMd, alertSelect, alertToast } from "../alert";
+import { alertInput, alertMd, alertNormal, alertSelect, alertToast } from "../alert";
 import { sayTTS } from "./tts";
 import { risuChatParser } from "../parser";
 import { sendChat } from ".";
@@ -22,8 +22,10 @@ export async function processMultiCommand(command:string) {
         }
     }
     splited.push(command.slice(lastIndex))
+    console.log(splited)
     for(let i = 0; i<splited.length; i++){
         const result = await processCommand(splited[i].trim(), pipe)
+        console.log(pipe)
         if(result === false){
             return false
         }
@@ -41,6 +43,10 @@ async function processCommand(command:string, pipe:string):Promise<false | strin
     const currentChat = currentChar.chats[currentChar.chatPage]
     let {commandName, arg, namedArg} = commandParser(command, pipe)
 
+    if(!arg){
+        arg = pipe
+    }
+
     arg = risuChatParser(arg, {
         chara: currentChar.type === 'character' ? currentChar : null
     })
@@ -51,7 +57,6 @@ async function processCommand(command:string, pipe:string):Promise<false | strin
             chara: currentChar.type === 'character' ? currentChar : null
         })
     }
-    console.log(commandName, arg, namedArg)
 
     switch(commandName){
         //STScript compatibility commands
@@ -59,12 +64,9 @@ async function processCommand(command:string, pipe:string):Promise<false | strin
             pipe = await alertInput(arg)
             return pipe
         }
-        case 'echo':{
-            alertToast(arg)
-            return pipe
-        }
+        case 'echo':
         case 'popup':{
-            alertMd(arg)
+            alertNormal(arg)
             return pipe
         }
         case 'pass':{
@@ -174,6 +176,45 @@ async function processCommand(command:string, pipe:string):Promise<false | strin
             }
             return ''
         }
+        case 'setvar':{
+            console.log(namedArg, arg)
+            const db = get(DataBase)
+            const selectedChar = get(selectedCharID)
+            const char = db.characters[selectedChar]
+            const chat = char.chats[char.chatPage]
+            chat.scriptstate = chat.scriptstate ?? {}
+            chat.scriptstate['$' + namedArg['key']] = arg
+            console.log(chat.scriptstate)
+
+            char.chats[char.chatPage] = chat
+            db.characters[selectedChar] = char
+            setDatabase(db)
+            return ''
+        }
+        case 'addvar':{
+            const db = get(DataBase)
+            const selectedChar = get(selectedCharID)
+            const char = db.characters[selectedChar]
+            const chat = char.chats[char.chatPage]
+            chat.scriptstate = chat.scriptstate ?? {}
+            chat.scriptstate['$' + namedArg['key']] = (Number(chat.scriptstate['$' + namedArg['key']]) + Number(arg)).toString()
+
+            char.chats[char.chatPage] = chat
+            db.characters[selectedChar] = char
+            setDatabase(db)
+            return ''
+        }
+        case 'getvar':{
+            const db = get(DataBase)
+            const selectedChar = get(selectedCharID)
+            const char = db.characters[selectedChar]
+            const chat = char.chats[char.chatPage]
+            chat.scriptstate = chat.scriptstate ?? {}
+            pipe = (chat.scriptstate['$' + namedArg['key']]).toString() ?? 'null'
+            return pipe
+        }
+
+
     }
     return false
 }
@@ -188,7 +229,7 @@ function commandParser(command:string, pipe:string){
     let argArray:string[] = []
     let namedArg:{[key:string]:string} = {}
     for(let i = 1; i<sliced.length; i++){
-        if(sliced.includes('=')){
+        if(sliced[i].includes('=')){
             const [key, value] = sliced[i].split('=')
             namedArg[key] = value
         }

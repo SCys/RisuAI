@@ -1,24 +1,20 @@
 export const patchNote = {
-    version: "1.84",
+    version: "1.95",
     content: 
 `
-# Update 1.84
-# Changes
-- Added \`{{endswith::A::B}}\`
-- Added \`{{contains::A::B}}\`
-- Added \`{{replace::A::B::C}}\`
-- Added \`{{split::A::B}}\`
-- Added \`{{join::A::B}}\`
-- Added \`{{length::A}}\`
-- Added \`{{arraylength::A}}\`
-- Added \`{{lower::A}}\`
-- Added \`{{upper::A}}\`
-- Added \`{{capitalize::A}}\`
-- Added \`{{round::A}}\`
-- Added \`{{floor::A}}\`
-- Added \`{{ceil::A}}\`
-- Added \`{{abs::A}}\`
-- Fix Claude streaming on ax. model
+# Update 1.95
+- Added New character import screen
+- Added Metadata viewer for chat
+- Changed default prompt
+- Changed High contrast text color
+- Changed SupaMemory and HypaMemory to return one chunk instead of multiple
+- Made progress circle color to change dynamically depending how the progress is
+- Imported flag would be saved when character is imported
+- Fixed Realm UI cutoff
+- Fixed Realm import not working for new URLs
+- Fixed Error message in SupaMemory returning [Object Object]
+- Fixed HypaMemory not running even the HypaMemory is enabled
+- Fixed HypaMemory and SupaMemory returning same result
 `
 }
 

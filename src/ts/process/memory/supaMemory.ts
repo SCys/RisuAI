@@ -151,29 +151,29 @@ export async function supaMemory(
                         value = value.replace(/[\.,\/#!$%\^&\*;:{}=\-_`~()]/g,"")
                     }
                     return value
+                }).filter((v) => {
+                    return !supaMemory.replace(/[\.,\/#!$%\^&\*;:{}=\-_`~()]/g,"").includes(v.replace(/[\.,\/#!$%\^&\*;:{}=\-_`~()]/g,""))
                 }))
                 const filteredChat = chats.filter((r) => r.role !== 'system' && r.role !== 'function')
                 const s = await hypa.similaritySearch(stringlizeChat(filteredChat.slice(0, 4), char?.name ?? '', false))
-                hypaResult = "past events: " + s.slice(0,3).join("\n")
-                currentTokens += await tokenizer.tokenizeChat({
-                    role: "assistant",
-                    content: hypaResult,
-                    memo: "hypaMemory"
-                })
-                currentTokens += 10
+                hypaResult = ''
+                if(s.length > 0){
+                    hypaResult = "past events: " + s.slice(0,3)
+                    currentTokens += await tokenizer.tokenizeChat({
+                        role: "assistant",
+                        content: hypaResult,
+                        memo: "hypaMemory"
+                    })
+                    currentTokens += 10
+                }
             }
         }
 
         if(currentTokens < maxContextTokens){
             chats.unshift({
                 role: "system",
-                content: supaMemory,
+                content: supaMemory + '\n\n' + hypaResult,
                 memo: "supaMemory"
-            })
-            chats.unshift({
-                role: "system",
-                content: hypaResult,
-                memo: "hypaMemory"
             })
             return {
                 currentTokens: currentTokens,
@@ -224,15 +224,31 @@ export async function supaMemory(
                     }
                 })
 
-                console.log(da)
+                try {
+                    if(!da.ok){
+                        return {
+                            currentTokens: currentTokens,
+                            chats: chats,
+                            error: "SupaMemory: HTTP: " + JSON.stringify(da.data)
+                        }
+                    }
+        
+                    result = (await da.data)?.choices[0]?.text?.trim()
     
-                result = (await da.data)?.choices[0]?.text?.trim()
+                    if(!result){
+                        return {
+                            currentTokens: currentTokens,
+                            chats: chats,
+                            error: "SupaMemory: HTTP: " + JSON.stringify(da.data)
+                        }
+                    }
 
-                if(!result){
+                    return result
+                } catch (error) {
                     return {
                         currentTokens: currentTokens,
                         chats: chats,
-                        error: "SupaMemory: HTTP: " + await da.data
+                        error: "SupaMemory: HTTP: " + error
                     }
                 }
             }
@@ -266,7 +282,10 @@ export async function supaMemory(
 
         while(currentTokens > maxContextTokens){
             const beforeToken = currentTokens
-            let maxChunkSize = maxContextTokens > 3500 ? 1200 : Math.floor(maxContextTokens / 3)
+            let maxChunkSize = Math.floor(maxContextTokens / 3)
+            if(db.maxSupaChunkSize > maxChunkSize){
+                maxChunkSize = db.maxSupaChunkSize
+            }
             let summarized = false
             let chunkSize = 0
             let stringlizedChat = ''
@@ -294,10 +313,8 @@ export async function supaMemory(
                             return result
                         }
 
-                        console.log(currentTokens)
                         currentTokens -= await tokenize(supaMemory)
                         currentTokens += await tokenize(result + '\n\n')
-                        console.log(currentTokens)
 
                         supaMemory = result + '\n\n'
                         summarized = true

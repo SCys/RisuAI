@@ -1,16 +1,17 @@
 <script lang="ts">
-    import { ArrowLeft, ArrowRight, PencilIcon, LanguagesIcon, RefreshCcwIcon, TrashIcon, CopyIcon, Volume2Icon } from "lucide-svelte";
+    import { ArrowLeft, ArrowRight, PencilIcon, LanguagesIcon, RefreshCcwIcon, TrashIcon, CopyIcon, Volume2Icon, BotIcon } from "lucide-svelte";
     import { ParseMarkdown, type simpleCharacterArgument } from "../../ts/parser";
     import AutoresizeArea from "../UI/GUI/TextAreaResizable.svelte";
-    import { alertConfirm, alertError } from "../../ts/alert";
+    import { alertConfirm, alertError, alertRequestData } from "../../ts/alert";
     import { language } from "../../lang";
-    import { DataBase, type groupChat } from "../../ts/storage/database";
-    import { CurrentCharacter, CurrentChat, selectedCharID } from "../../ts/stores";
-    import { translate, translateHTML } from "../../ts/translator/translator";
+    import { DataBase, type MessageGenerationInfo } from "../../ts/storage/database";
+    import { CurrentCharacter, CurrentChat, CurrentVariablePointer } from "../../ts/stores";
+    import { translateHTML } from "../../ts/translator/translator";
     import { risuChatParser } from "src/ts/process/scripts";
     import { get } from "svelte/store";
-  import { isEqual } from "lodash";
-  import { sayTTS } from "src/ts/process/tts";
+    import { capitalize, isEqual } from "lodash";
+    import { sayTTS } from "src/ts/process/tts";
+    import { getModelShortName } from "src/ts/model/names";
     export let message = ''
     export let name = ''
     export let largePortrait = false
@@ -18,6 +19,7 @@
     export let img:string|Promise<string> = ''
     export let idx = -1
     export let rerollIcon = false
+    export let MessageGenerationInfo:MessageGenerationInfo|null = null
     export let onReroll = () => {}
     export let unReroll = () => {}
     export let character:simpleCharacterArgument|string|null = null
@@ -66,7 +68,7 @@
         $CurrentChat.message = msg
     }
 
-    function displaya(message:string){
+    function displaya(message:string, chatPointer?:any){
         msgDisplay = risuChatParser(message, {chara: name, chatID: idx, rmVar: true, visualize: true})
     }
 
@@ -122,7 +124,7 @@
         }
     }
 
-    $: displaya(message)
+    $: displaya(message, $CurrentVariablePointer)
 </script>
 <div class="flex max-w-full justify-center risu-chat" style={isLastMemory ? `border-top:${$DataBase.memoryLimitThickness}px solid rgba(98, 114, 164, 0.7);` : ''}>
     <div class="text-textcolor mt-1 ml-4 mr-4 mb-1 p-2 bg-transparent flex-grow border-t-gray-900 border-opacity-30 border-transparent flexium items-start max-w-full" >
@@ -199,6 +201,24 @@
                     {/if}
                 </div>
             </div>
+            {#if MessageGenerationInfo && $DataBase.requestInfoInsideChat}
+                <div>
+                    <button class="text-sm p-1 text-textcolor2 border-darkborderc float-end mr-2 my-2
+                                    hover:ring-borderc hover:ring rounded-md hover:text-textcolor transition-all flex justify-center items-center" 
+                            on:click={() => {
+                                alertRequestData({
+                                    genInfo: MessageGenerationInfo,
+                                    idx: idx,
+                                })
+                            }}
+                    >
+                        <BotIcon size={20} />
+                        <span class="ml-1">
+                            {capitalize(getModelShortName(MessageGenerationInfo.model))}
+                        </span>
+                    </button>
+                </div>
+            {/if}
             {#if editMode}
                 <AutoresizeArea bind:value={message} />
             {:else}

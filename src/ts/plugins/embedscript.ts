@@ -183,6 +183,25 @@ addWorkerFunction('setCharacterFirstMessage', async (data:string) => {
     return true
 })
 
+addWorkerFunction('getBackgroundEmbedding', async () => {
+    const db = get(DataBase)
+    const selectedChar = get(selectedCharID)
+    const char = db.characters[selectedChar]
+    return char.backgroundHTML
+})
+
+addWorkerFunction('setBackgroundEmbedding', async (data:string) => {
+    const db = get(DataBase)
+    const selectedChar = get(selectedCharID)
+    if(typeof data !== 'string'){
+        return false
+    }
+    db.characters[selectedChar].backgroundHTML = data
+    setDatabase(db)
+    return true
+})
+
+
 addWorkerFunction('getState', async (statename) => {
     const db = get(DataBase)
     const selectedChar = get(selectedCharID)
@@ -305,23 +324,4 @@ export async function runCharacterJS(arg:{
         return arg.data
     }
 
-}
-
-export async function watchParamButton() {
-    while(true){
-        const qs = document.querySelectorAll('*[risu-btn]:not([risu-btn-run="true"])')
-        for(let i = 0; i < qs.length; i++){
-            const q = qs[i]
-            const code = q.getAttribute('risu-btn')
-            q.setAttribute('risu-btn-run','true')
-            q.addEventListener('click',async ()=>{
-                await runCharacterJS({
-                    code: null,
-                    mode: 'onButtonClick',
-                    data: code
-                })
-            })
-        }
-        await sleep(100)
-    }
 }

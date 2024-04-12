@@ -2,6 +2,7 @@
   import { alertMd, alertNormal } from "src/ts/alert";
   import { DataBase } from "src/ts/storage/database";
     import { openURL } from "src/ts/storage/globalApi";
+  import { sideBarStore } from "src/ts/stores";
 
     let specialDay = ''
     const today = new Date()
@@ -10,6 +11,15 @@
     }
     if( today.getMonth() === 0 && today.getDate() < 4){
         specialDay = 'newYear'
+    }
+    if( today.getMonth() === 3 && today.getDate() === 1){
+        specialDay = 'aprilFool'
+    }
+    if( today.getMonth() === 3 && today.getDate() === 13 ){
+        specialDay = 'anniversary'
+    }
+    if( today.getMonth() === 9 && today.getDate() === 31){
+        specialDay = 'halloween'
     }
     let iconAnimation = 0
     let clicks = 0
@@ -74,6 +84,15 @@ You've had:
             >
         {/if}
     {/if}
+    {#if specialDay === 'anniversary'}
+        <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+        {#if clicks < 5}
+            <img src="./birthday.png" alt="birthday" class="absolute logo-top"
+                style:top={(-28 + iconAnimation).toFixed(0) + 'px'}
+                style:right={'-30px'}
+            >
+        {/if}
+    {/if}
     {#if specialDay === 'newYear'}
         <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
         <img src="./sun.webp" alt="sun" class="absolute -z-10"
@@ -84,6 +103,13 @@ You've had:
     {/if}
 </h2>
 
+{#if specialDay === 'anniversary'}
+    <h1>
+        <span class="text-2xl font-extralight italic text-amber-400 hover:text-amber-600 cursor-pointer transition" on:click={() => {
+            openURL('https://risuai.net')
+        }}>Happy 1st Anniversary!</span>
+    </h1>
+{/if}
 {#if clicks >= 5}
     <div class="bg-black w-full p-3 mt-4 mb-4 rounded-md max-w-2xl" id="minigame-div">
         <span class="font-semibold text-lg">Score: {score}</span><br>
