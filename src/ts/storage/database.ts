@@ -15,7 +15,7 @@ import type { OobaChatCompletionRequestParams } from '../model/ooba';
 
 export const DataBase = writable({} as any as Database)
 export const loadedStore = writable(false)
-export let appVer = "1.95.0"
+export let appVer = "1.96.0"
 export let webAppSubVer = ''
 
 export function setDatabase(data:Database){
@@ -383,6 +383,14 @@ export function setDatabase(data:Database){
     data.heightMode ??= 'normal'
     data.antiClaudeOverload ??= false
     data.maxSupaChunkSize ??= 1200
+    data.ollamaURL ??= ''
+    data.ollamaModel ??= ''
+    data.autoContinueChat ??= false
+    data.autoContinueMinTokens ??= 0
+    data.repetition_penalty ??= 1
+    data.min_p ??= 0
+    data.top_a ??= 0
+    data.customTokenizer ??= 'tik'
 
     changeLanguage(data.language)
     DataBase.set(data)
@@ -604,6 +612,9 @@ export interface Database{
         }
     },
     top_k:number
+    repetition_penalty:number
+    min_p:number
+    top_a:number
     claudeAws:boolean
     lastPatchNoteCheckVersion?:string,
     removePunctuationHypa?:boolean
@@ -618,6 +629,12 @@ export interface Database{
     noWaitForTranslate:boolean
     antiClaudeOverload:boolean
     maxSupaChunkSize:number
+    ollamaURL:string
+    ollamaModel:string
+    autoContinueChat:boolean
+    autoContinueMinTokens:number
+    removeIncompleteResponse:boolean
+    customTokenizer:string
 }
 
 export interface customscript{
@@ -1249,6 +1266,9 @@ export async function importPreset(){
         pr.top_p = pre.top_p ?? 1
 
         for(const prompt of pre?.prompt_order?.[0]?.order){
+            if(!prompt?.enabled){
+                continue
+            }
             const p = findPrompt(prompt?.identifier ?? '')
             if(p){
                 switch(p.identifier){
@@ -1291,9 +1311,6 @@ export async function importPreset(){
                         break
                     }
                     case 'worldInfoAfter':{
-                        pr.promptTemplate.push({
-                            type: 'postEverything'
-                        })
                         break
                     }
                     case 'charDescription':{
@@ -1323,6 +1340,17 @@ export async function importPreset(){
                 console.log("Prompt not found", prompt)
             
             }
+        }
+        if(pre?.assistant_prefill){
+            pr.promptTemplate.push({
+                type: 'postEverything'
+            })
+            pr.promptTemplate.push({
+                type: 'plain',
+                type2: 'main',
+                text: `{{#if {{prefill_supported}}}}${pre?.assistant_prefill}{{/if}}`,
+                role: 'bot'
+            })
         }
         pr.name = "Imported ST Preset"
         db.botPresets.push(pr)

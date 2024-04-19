@@ -5,7 +5,7 @@
     import { DataBase } from "src/ts/storage/database";
     import { customProviderStore, getCurrentPluginMax } from "src/ts/plugins/plugins";
     import { getModelMaxContext, isTauri } from "src/ts/storage/globalApi";
-    import { tokenize, tokenizeAccurate } from "src/ts/tokenizer";
+    import { tokenize, tokenizeAccurate, tokenizerList } from "src/ts/tokenizer";
     import ModelList from "src/lib/UI/ModelList.svelte";
     import DropList from "src/lib/SideBars/DropList.svelte";
     import { PlusIcon, TrashIcon } from "lucide-svelte";
@@ -203,6 +203,13 @@
     <span class="text-textcolor mt-4">Risu {language.apiKey}</span>
     <TextInput marginBottom={false} size={"sm"} bind:value={$DataBase.proxyKey} />
 {/if}
+{#if $DataBase.aiModel === 'ollama-hosted'}
+    <span class="text-textcolor mt-4">Ollama URL</span>
+    <TextInput marginBottom={false} size={"sm"} bind:value={$DataBase.ollamaURL} />
+
+    <span class="text-textcolor mt-4">Ollama Model</span>
+    <TextInput marginBottom={false} size={"sm"} bind:value={$DataBase.ollamaModel} />
+{/if}
 {#if $DataBase.aiModel === 'openrouter' || $DataBase.subModel === 'openrouter'}
     <span class="text-textcolor mt-4">Openrouter Key</span>
     <TextInput marginBottom={false} size={"sm"} bind:value={$DataBase.openrouterKey} />
@@ -235,6 +242,14 @@
         </SelectInput>
     {/await}
 {/if}
+{#if $DataBase.aiModel === 'openrouter' || $DataBase.aiModel === 'reverse_proxy'}
+    <span class="text-textcolor">{language.tokenizer}</span>
+    <SelectInput bind:value={$DataBase.customTokenizer}>
+        {#each tokenizerList as entry}
+            <OptionInput value={entry[0]}>{entry[1]}</OptionInput>
+        {/each}
+    </SelectInput>
+{/if}
 {#if $DataBase.aiModel.startsWith('gpt') || $DataBase.subModel.startsWith('gpt')
     || $DataBase.aiModel.startsWith('instructgpt') || $DataBase.subModel.startsWith('instructgpt')}
     <span class="text-textcolor">OpenAI {language.apiKey} <Help key="oaiapikey"/></span>
@@ -247,10 +262,10 @@
     </div>
 {/if}
 {#if $DataBase.aiModel.startsWith('openrouter')}
-    <div class="flex items-center">
+    <div class="flex items-center mb-4">
         <Check bind:check={$DataBase.openrouterFallback} name={language.openrouterFallback}/>
     </div>
-    <div class="flex items-center">
+    <div class="flex items-center mb-4">
         <Check bind:check={$DataBase.openrouterMiddleOut} name={language.openrouterMiddleOut}/>
     </div>
 {/if}
@@ -345,7 +360,19 @@
     <SliderInput min={0} max={100} step={1} bind:value={$DataBase.top_k}/>
     <span class="text-textcolor2 mb-6 text-sm">{($DataBase.top_k).toFixed(0)}</span>
 {/if}
+{#if $DataBase.aiModel.startsWith('openrouter')}
+    <span class="text-textcolor">Repetition penalty</span>
+    <SliderInput min={0} max={2} step={0.01} bind:value={$DataBase.repetition_penalty}/>
+    <span class="text-textcolor2 mb-6 text-sm">{($DataBase.repetition_penalty).toFixed(2)}</span>
 
+    <span class="text-textcolor">Min P</span>
+    <SliderInput min={0} max={1} step={0.01} bind:value={$DataBase.min_p}/>
+    <span class="text-textcolor2 mb-6 text-sm">{($DataBase.min_p).toFixed(2)}</span>
+
+    <span class="text-textcolor">Top A</span>
+    <SliderInput min={0} max={1} step={0.01} bind:value={$DataBase.top_a}/>
+    <span class="text-textcolor2 mb-6 text-sm">{($DataBase.top_a).toFixed(2)}</span>
+{/if}
 {#if $DataBase.aiModel === 'textgen_webui' || $DataBase.aiModel === 'mancer' || $DataBase.aiModel.startsWith('local_') || $DataBase.aiModel.startsWith('hf:::')}
     <span class="text-textcolor">Repetition Penalty</span>
     <SliderInput min={1} max={1.5} step={0.01} bind:value={$DataBase.ooba.repetition_penalty}/>

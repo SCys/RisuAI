@@ -18,6 +18,8 @@
 <NumberInput marginBottom={true} size={"sm"} min={0} max={20} bind:value={$DataBase.loreBookDepth}/>
 <span class="text-textcolor">{language.loreBookToken}</span>
 <NumberInput marginBottom={true} size={"sm"} min={0} max={4096} bind:value={$DataBase.loreBookToken}/>
+<span class="text-textcolor">{language.autoContinueMinTokens}</span>
+<NumberInput marginBottom={true} size={"sm"} min={0} bind:value={$DataBase.autoContinueMinTokens}/>
 
 <span class="text-textcolor">{language.additionalPrompt}</span>
 <TextInput marginBottom={true} size={"sm"} bind:value={$DataBase.additionalPrompt}/>
@@ -70,6 +72,12 @@
 </div>
 <div class="flex items-center mt-4">
     <Check bind:check={$DataBase.autofillRequestUrl} name={language.autoFillRequestURL}> <Help key="autoFillRequestURL"/></Check>
+</div>
+<div class="flex items-center mt-4">
+    <Check bind:check={$DataBase.autoContinueChat} name={language.autoContinueChat}> <Help key="autoContinueChat"/></Check>
+</div>
+<div class="flex items-center mt-4">
+    <Check bind:check={$DataBase.removeIncompleteResponse} name={language.removeIncompleteResponse}></Check>
 </div>
 <div class="flex items-center mt-4">
     <Check bind:check={$DataBase.newOAIHandle} name={language.newOAIHandle}/>

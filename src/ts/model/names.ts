@@ -93,6 +93,10 @@ export function getModelName(name:string){
             return 'GPT-4 Turbo'
         case 'gpt4_turbo_20240409':
             return 'GPT-4 Turbo (20240409)'
+        case 'gemini-1.5-pro-latest':
+            return 'Gemini 1.5 Pro'
+        case 'ollama-hosted':
+            return 'Ollama'
         default:
             if(name.startsWith("horde:::")){
                 const split = name.split(":::")

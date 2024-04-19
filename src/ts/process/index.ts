@@ -5,7 +5,7 @@ import { ChatTokenizer, tokenize, tokenizeNum } from "../tokenizer";
 import { language } from "../../lang";
 import { alertError } from "../alert";
 import { loadLoreBookPrompt } from "./lorebook";
-import { findCharacterbyId, getAuthorNoteDefaultText } from "../util";
+import { findCharacterbyId, getAuthorNoteDefaultText, isLastCharPunctuation, trimUntilPunctuation } from "../util";
 import { requestChatData } from "./request";
 import { stableDiff } from "./stableDiff";
 import { processScript, processScriptFull, risuChatParser } from "./scripts";
@@ -55,7 +55,7 @@ export const doingChat = writable(false)
 export const chatProcessStage = writable(0)
 export const abortChat = writable(false)
 
-export async function sendChat(chatProcessIndex = -1,arg:{chatAdditonalTokens?:number,signal?:AbortSignal,continue?:boolean} = {}):Promise<boolean> {
+export async function sendChat(chatProcessIndex = -1,arg:{chatAdditonalTokens?:number,signal?:AbortSignal,continue?:boolean,usedContinueTokens?:number} = {}):Promise<boolean> {
 
     chatProcessStage.set(0)
     const abortSignal = arg.signal ?? (new AbortController()).signal
@@ -1026,7 +1026,10 @@ export async function sendChat(chatProcessIndex = -1,arg:{chatAdditonalTokens?:n
                 if(db.cipherChat){
                     result = decipherChat(result)
                 }
-                const result2 = await processScriptFull(nowChatroom, reformatContent(prefix + result), 'editoutput', msgIndex)
+                if(db.removeIncompleteResponse){
+                    result = trimUntilPunctuation(result)
+                }
+                let result2 = await processScriptFull(nowChatroom, reformatContent(prefix + result), 'editoutput', msgIndex)
                 db.characters[selectedChar].chats[selectedChat].message[msgIndex].data = result2.data
                 emoChanged = result2.emoChanged
                 db.characters[selectedChar].reloadKeys += 1
@@ -1077,6 +1080,9 @@ export async function sendChat(chatProcessIndex = -1,arg:{chatAdditonalTokens?:n
                 msgIndex -= 1
                 let beforeChat = db.characters[selectedChar].chats[selectedChat].message[msgIndex]
                 result2 = await processScriptFull(nowChatroom, reformatContent(beforeChat.data + mess), 'editoutput', msgIndex)
+            }
+            if(db.removeIncompleteResponse){
+                result2.data = trimUntilPunctuation(result2.data)
             }
             result = result2.data
             const inlayResult = runInlayScreen(currentChar, result)
@@ -1130,6 +1136,27 @@ export async function sendChat(chatProcessIndex = -1,arg:{chatAdditonalTokens?:n
             db.characters[selectedChar].chats[selectedChat] = triggerResult.chat
             setDatabase(db)
         }
+    }
+
+    let needsAutoContinue = false
+    const resultTokens = await tokenize(result) + (arg.usedContinueTokens || 0)
+    if(db.autoContinueMinTokens > 0 && resultTokens < db.autoContinueMinTokens){
+        needsAutoContinue = true
+    }
+
+    if(db.autoContinueChat && (!isLastCharPunctuation(result))){
+        //if result doesn't end with punctuation or special characters, auto continue
+        needsAutoContinue = true
+    }
+
+    if(needsAutoContinue){
+        doingChat.set(false)
+        return await sendChat(chatProcessIndex, {
+            chatAdditonalTokens: arg.chatAdditonalTokens,
+            continue: true,
+            signal: abortSignal,
+            usedContinueTokens: resultTokens
+        })
     }
 
     chatProcessStage.set(4)
