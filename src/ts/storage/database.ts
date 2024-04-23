@@ -15,7 +15,7 @@ import type { OobaChatCompletionRequestParams } from '../model/ooba';
 
 export const DataBase = writable({} as any as Database)
 export const loadedStore = writable(false)
-export let appVer = "1.96.0"
+export let appVer = "1.97.2"
 export let webAppSubVer = ''
 
 export function setDatabase(data:Database){
@@ -391,6 +391,8 @@ export function setDatabase(data:Database){
     data.min_p ??= 0
     data.top_a ??= 0
     data.customTokenizer ??= 'tik'
+    data.instructChatTemplate ??= "chatml"
+    data.openrouterProvider ??= ''
 
     changeLanguage(data.language)
     DataBase.set(data)
@@ -635,6 +637,9 @@ export interface Database{
     autoContinueMinTokens:number
     removeIncompleteResponse:boolean
     customTokenizer:string
+    instructChatTemplate:string
+    JinjaTemplate:string
+    openrouterProvider:string
 }
 
 export interface customscript{
@@ -835,6 +840,10 @@ export interface botPreset{
     reverseProxyOobaArgs?: OobaChatCompletionRequestParams
     top_p?: number
     proomptSettings?: ProomptSettings
+    repetition_penalty?:number
+    min_p?:number
+    top_a?:number
+    openrouterProvider?:string
 
 }
 
@@ -1095,7 +1104,11 @@ export function saveCurrentPreset(){
         customProxyRequestModel: db.customProxyRequestModel,
         reverseProxyOobaArgs: cloneDeep(db.reverseProxyOobaArgs) ?? null,
         top_p: db.top_p ?? 1,
-        proomptSettings: cloneDeep(db.proomptSettings) ?? null
+        proomptSettings: cloneDeep(db.proomptSettings) ?? null,
+        repetition_penalty: db.repetition_penalty,
+        min_p: db.min_p,
+        top_a: db.top_a,
+        openrouterProvider: db.openrouterProvider
     }
     db.botPresets = pres
     setDatabase(db)
@@ -1172,6 +1185,10 @@ export function setPreset(db:Database, newPres: botPreset){
         sendName: false,
         utilOverride: false
     }
+    db.repetition_penalty = newPres.repetition_penalty
+    db.min_p = newPres.min_p
+    db.top_a = newPres.top_a
+    db.openrouterProvider = newPres.openrouterProvider
     return db
 }
 
