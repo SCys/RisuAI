@@ -14,10 +14,11 @@ export const tokenizerList = [
     ['novelai', 'NovelAI'],
     ['claude', 'Claude'],
     ['llama', 'Llama'],
+    ['llama3', 'Llama3'],
     ['novellist', 'Novellist'],
 ] as const
 
-async function encode(data:string):Promise<(number[]|Uint32Array|Int32Array)>{
+export async function encode(data:string):Promise<(number[]|Uint32Array|Int32Array)>{
     let db = get(DataBase)
     if(db.aiModel === 'openrouter' || db.aiModel === 'reverse_proxy'){
         switch(db.customTokenizer){
@@ -31,6 +32,8 @@ async function encode(data:string):Promise<(number[]|Uint32Array|Int32Array)>{
                 return await tokenizeWebTokenizers(data, 'claude')
             case 'novellist':
                 return await tokenizeWebTokenizers(data, 'novellist')
+            case 'llama3':
+                return await tokenizeWebTokenizers(data, 'llama')
             default:
                 return await tikJS(data)
         }
@@ -71,7 +74,7 @@ async function encode(data:string):Promise<(number[]|Uint32Array|Int32Array)>{
     return await tikJS(data)
 }
 
-type tokenizerType = 'novellist'|'claude'|'novelai'|'llama'|'mistral'
+type tokenizerType = 'novellist'|'claude'|'novelai'|'llama'|'mistral'|'llama3'
 
 let tikParser:Tiktoken = null
 let tokenizersTokenizer:Tokenizer = null
@@ -103,6 +106,11 @@ async function tokenizeWebTokenizers(text:string, type:tokenizerType) {
             case "claude":
                 tokenizersTokenizer = await webTokenizer.Tokenizer.fromJSON(
                     await (await fetch("/token/claude/claude.json")
+                ).arrayBuffer())
+                break
+            case 'llama3':
+                tokenizersTokenizer = await webTokenizer.Tokenizer.fromJSON(
+                    await (await fetch("/token/llama/llama3.json")
                 ).arrayBuffer())
                 break
             case 'novelai':

@@ -1,15 +1,12 @@
 export const patchNote = {
-    version: "1.97",
+    version: "1.102",
     content: 
 `
-# Update 1.97
-- Replaced old Prefix-based instruct model formatter to jinja based instruct model formatter
-- Added Llama3 formatter template
-- Added Llama2 formatter template
-- Added Chatml formatter template
-- Added GPT2 formatter template
-- Added Gemma formatter template
-- Added Mistral formatter template
+# Update 1.102
+- Changed download URL notification
+- Fixed hanurai to skip query chats when push to processor (#400)
+- Fixed ollama's hardcoded url (#404)
+- Added New Option Combine Translation (#405)
 `
 }
 

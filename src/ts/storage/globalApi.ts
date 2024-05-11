@@ -15,7 +15,6 @@ import { alertConfirm, alertError, alertNormal, alertNormalWait } from "../alert
 import { checkDriverInit, syncDrive } from "../drive/drive";
 import { hasher } from "../parser";
 import { characterURLImport, hubURL } from "../characterCards";
-import { cloneDeep } from "lodash";
 import { defaultJailbreak, defaultMainPrompt, oldJailbreak, oldMainPrompt } from "./defaultPrompts";
 import { loadRisuAccountData } from "../drive/accounter";
 import { decodeRisuSave, encodeRisuSave } from "./risuSave";
@@ -31,6 +30,8 @@ import { listen } from '@tauri-apps/api/event'
 import { registerPlugin } from '@capacitor/core';
 import { language } from "src/lang";
 import { startObserveDom } from "../observer";
+import { removeDefaultHandler } from "src/main";
+import { updateGuisize } from "../gui/guisize";
 
 //@ts-ignore
 export const isTauri = !!window.__TAURI__
@@ -504,6 +505,8 @@ export async function loadData() {
             updateTextTheme()
             updateAnimationSpeed()
             updateHeightMode()
+            updateErrorHandling()
+            updateGuisize()
             if(db.botSettingAtStart){
                 botMakerMode.set(true)
             }
@@ -524,6 +527,20 @@ export async function getFetchData(id:string) {
       }
   }
   return null
+}
+
+function updateErrorHandling(){
+    removeDefaultHandler()
+    const errorHandler = (event: ErrorEvent) => {
+        console.error(event.error)
+        alertError(event.error)
+    }
+    const rejectHandler = (event: PromiseRejectionEvent) => {
+        console.error(event.reason)
+        alertError(event.reason)
+    }
+    window.addEventListener('error', errorHandler)
+    window.addEventListener('unhandledrejection', rejectHandler)
 }
 
 const knownHostes = ["localhost","127.0.0.1","0.0.0.0"]
@@ -924,7 +941,7 @@ async function checkNewFormat() {
                 name: "Global Regex",
                 description: "Converted from legacy global regex",
                 id: id,
-                regex: cloneDeep(db.globalscript)
+                regex: structuredClone(db.globalscript)
             }
             db.modules.push(regexModule)
             db.enabledModules.push(id)
@@ -938,7 +955,7 @@ async function checkNewFormat() {
                     name: db.loreBook[i].name || "Unnamed Global Lorebook",
                     description: "Converted from legacy global lorebook",
                     id: id,
-                    lorebook: cloneDeep(db.loreBook[i].data)
+                    lorebook: structuredClone(db.loreBook[i].data)
                 }
                 db.modules.push(lbModule)
                 if(i === selIndex){
@@ -960,7 +977,6 @@ async function checkNewFormat() {
     if(db.mainPrompt === oldJailbreak){
         db.mainPrompt = defaultJailbreak
     }
-
     setDatabase(db)
     checkCharOrder()
 }
@@ -968,7 +984,7 @@ async function checkNewFormat() {
 export function checkCharOrder() {
     let db = get(DataBase)
     db.characterOrder = db.characterOrder ?? []
-    let ordered = cloneDeep(db.characterOrder ?? [])
+    let ordered = structuredClone(db.characterOrder ?? [])
     for(let i=0;i<db.characterOrder.length;i++){
         const folder =db.characterOrder[i]
         if(typeof(folder) !== 'string' && folder){
@@ -984,7 +1000,7 @@ export function checkCharOrder() {
         const charId = db.characters[i].chaId
         charIdList.push(charId)
         if(!ordered.includes(charId)){
-            if(charId !== '§temp'){
+            if(charId !== '§temp' && charId !== '§playground'){
                 db.characterOrder.push(charId)
             }
         }
@@ -1347,7 +1363,7 @@ export async function fetchNative(url:string, arg:{
 }):Promise<{ body: ReadableStream<Uint8Array>; headers: Headers; status: number }> {
     let headers = arg.headers ?? {}
     const db = get(DataBase)
-    let throughProxi = (!isTauri) && (!isNodeServer) && (!db.usePlainFetch) && (!Capacitor.isNativePlatform())
+    let throughProxy = (!isTauri) && (!isNodeServer) && (!db.usePlainFetch)
     let fetchLogIndex = addFetchLog({
         body: arg.body,
         headers: arg.headers,
@@ -1357,7 +1373,7 @@ export async function fetchNative(url:string, arg:{
         resType: 'stream',
         chatId: arg.chatId
     })
-    if(isTauri || Capacitor.isNativePlatform()){
+    if(isTauri){
         fetchIndex++
         if(arg.signal && arg.signal.aborted){
             throw new Error('aborted')
@@ -1452,7 +1468,7 @@ export async function fetchNative(url:string, arg:{
 
 
     }
-    else if(throughProxi){
+    else if(throughProxy){
         const r = await fetch(hubURL + `/proxy2`, {
             body: arg.body,
             headers: arg.useRisuTk ? {

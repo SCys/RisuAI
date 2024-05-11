@@ -1,13 +1,11 @@
 import { get } from "svelte/store";
 import type { MultiModal, OpenAIChat, OpenAIChatFull } from ".";
-import { DataBase, setDatabase, type character } from "../storage/database";
+import { DataBase, type character } from "../storage/database";
 import { pluginProcess } from "../plugins/plugins";
 import { language } from "../../lang";
 import { stringlizeAINChat, stringlizeChat, getStopStrings, unstringlizeAIN, unstringlizeChat } from "./stringlize";
 import { addFetchLog, fetchNative, globalFetch, isNodeServer, isTauri, textifyReadableStream } from "../storage/globalApi";
 import { sleep } from "../util";
-import { createDeep } from "./deepai";
-import { hubURL } from "../characterCards";
 import { NovelAIBadWordIds, stringlizeNAIChat } from "./models/nai";
 import { strongBan, tokenize, tokenizeNum } from "../tokenizer";
 import { runGGUFModel } from "./models/local";
@@ -16,13 +14,12 @@ import { SignatureV4 } from "@smithy/signature-v4";
 import { HttpRequest } from "@smithy/protocol-http";
 import { Sha256 } from "@aws-crypto/sha256-js";
 import { v4 } from "uuid";
-import { cloneDeep } from "lodash";
 import { supportsInlayImage } from "./files/image";
 import { OaifixBias } from "../plugins/fixer";
 import { Capacitor } from "@capacitor/core";
 import { getFreeOpenRouterModel } from "../model/openrouter";
 import { runTransformers } from "./transformers";
-import {createParser, type ParsedEvent, type ReconnectInterval} from 'eventsource-parser'
+import {createParser} from 'eventsource-parser'
 import {Ollama} from 'ollama/dist/browser.mjs'
 import { applyChatTemplate } from "./templates/chatTemplate";
 
@@ -126,7 +123,7 @@ export interface OpenAIChatExtra {
 
 export async function requestChatDataMain(arg:requestDataArgument, model:'model'|'submodel', abortSignal:AbortSignal=null):Promise<requestDataResponse> {
     const db = get(DataBase)
-    let formated = cloneDeep(arg.formated)
+    let formated = structuredClone(arg.formated)
     let maxTokens = arg.maxTokens ??db.maxResponse
     let temperature = arg.temperature ?? (db.temperature / 100)
     let bias = arg.bias
@@ -180,7 +177,7 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
             for(let i=0;i<formated.length;i++){
                 const m = formated[i]
                 if(m.multimodals && m.multimodals.length > 0 && m.role === 'user'){
-                    let v:OpenAIChatExtra = cloneDeep(m)
+                    let v:OpenAIChatExtra = structuredClone(m)
                     let contents:OpenAIContents[] = []
                     for(let j=0;j<m.multimodals.length;j++){
                         contents.push({
@@ -467,6 +464,16 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
                         order: [db.openrouterProvider]
                     }
                 }
+
+                if(db.useInstructPrompt){
+                    //@ts-ignore
+                    delete body.messages
+
+                    const prompt = applyChatTemplate(formated)
+
+                    //@ts-ignore
+                    body.prompt = prompt
+                }
             }
 
             if(aiModel === 'reverse_proxy' && db.reverseProxyOobaMode){
@@ -598,7 +605,7 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
                                         }
                                         const choices = JSON.parse(rawChunk).choices
                                         for(const choice of choices){
-                                            const chunk = choice.delta.content
+                                            const chunk = choice.delta.content ?? choices.text
                                             if(chunk){
                                                 if(multiGen){
                                                     const ind = choice.index.toString()
@@ -693,6 +700,13 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
                         }
 
                     }
+
+                    if(dat?.choices[0]?.text){
+                        return {
+                            type: 'success',
+                            result: dat.choices[0].text
+                        }
+                    }
                     const msg:OpenAIChatFull = (dat.choices[0].message)
                     return {
                         type: 'success',
@@ -725,7 +739,7 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
         case 'novelai':
         case 'novelai_kayra':{
             console.log(arg.continue)
-            const proompt = stringlizeNAIChat(formated, currentChar?.name ?? '', arg.continue)
+            const prompt = stringlizeNAIChat(formated, currentChar?.name ?? '', arg.continue)
             let logit_bias_exp:{
                 sequence: number[], bias: number, ensure_sequence_finish: false, generate_once: true
             }[] = []
@@ -788,7 +802,7 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
 
               
             const body = {
-                "input": proompt,
+                "input": prompt,
                 "model": aiModel === 'novelai_kayra' ? 'kayra-v1' : 'clio-v1',
                 "parameters":payload
             }
@@ -870,7 +884,7 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
             let blockingUrl = db.textgenWebUIBlockingURL.replace(/\/api.*/, "/api/v1/generate")
             let bodyTemplate:any
             const suggesting = model === "submodel"
-            const proompt = applyChatTemplate(formated)
+            const prompt = applyChatTemplate(formated)
             let stopStrings = getStopStrings(suggesting)
             if(db.localStopStrings){
                 stopStrings = db.localStopStrings.map((v) => {
@@ -898,7 +912,7 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
                 'seed': -1,
                 add_bos_token: db.ooba.add_bos_token,
                 topP: db.top_p,
-                prompt: proompt
+                prompt: prompt
             }
 
             const headers = (aiModel === 'textgen_webui') ? {} : {
@@ -989,7 +1003,7 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
         
         case 'ooba': {
             const suggesting = model === "submodel"
-            const proompt = applyChatTemplate(formated)
+            const prompt = applyChatTemplate(formated)
             let stopStrings = getStopStrings(suggesting)
             if(db.localStopStrings){
                 stopStrings = db.localStopStrings.map((v) => {
@@ -997,7 +1011,7 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
                 })
             }
             let bodyTemplate:Record<string, any> = {
-                'prompt': proompt,
+                'prompt': prompt,
                 presence_penalty: arg.PresensePenalty || (db.PresensePenalty / 100),
                 frequency_penalty: arg.frequencyPenalty || (db.frequencyPenalty / 100),
                 logit_bias: {},
@@ -1338,7 +1352,7 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
 
         }
         case "kobold":{
-            const proompt = stringlizeChat(formated, currentChar?.name ?? '', arg.continue)
+            const prompt = stringlizeChat(formated, currentChar?.name ?? '', arg.continue)
             const url = new URL(db.koboldURL)
             if(url.pathname.length < 3){
                 url.pathname = 'api/v1/generate'
@@ -1347,7 +1361,7 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
             const da = await globalFetch(url.toString(), {
                 method: "POST",
                 body: {
-                    "prompt": proompt,
+                    "prompt": prompt,
                     "temperature": (db.temperature / 100),
                     "top_p": 0.9
                 },
@@ -1433,40 +1447,6 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
                 'result': unstr
             }
         }
-        case "deepai":{
-
-            for(let i=0;i<formated.length;i++){
-                delete formated[i].memo
-                delete formated[i].name
-                if(arg.isGroupChat && formated[i].name && formated[i].role === 'assistant'){
-                    formated[i].content = formated[i].name + ": " + formated[i].content
-                }
-                if(formated[i].role !== 'assistant' && formated[i].role !== 'user'){
-                    formated[i].content = formated[i].role + ": " + formated[i].content
-                    formated[i].role = 'assistant'
-                }
-                formated[i].name = undefined
-            }
-
-            const response = await createDeep([{
-                role: 'user',
-                content: stringlizeChat(formated, currentChar?.name ?? '', arg.continue)
-            }])
-
-            if(!response.ok){
-                return {
-                    type: 'fail',
-                    result: response.data
-                }
-            }
-
-            const result = Buffer.from(response.data).toString('utf-8')
-
-            return {
-                'type': 'success',
-                'result': result
-            }
-        }
         case 'risullm-proto':{
             const res = await globalFetch('https://sv.risuai.xyz/risullm', {
                 body: {
@@ -1510,7 +1490,7 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
             }
         }
         case 'ollama-hosted':{
-            const ollama = new Ollama({host: 'http://localhost:11434'})
+            const ollama = new Ollama({host: db.ollamaURL})
 
             const response = await ollama.chat({
                 model: db.ollamaModel,
@@ -2182,12 +2162,12 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
 
             }
             if(aiModel.startsWith("horde:::")){
-                const proompt = stringlizeChat(formated, currentChar?.name ?? '', arg.continue)
+                const prompt = stringlizeChat(formated, currentChar?.name ?? '', arg.continue)
 
                 const realModel = aiModel.split(":::")[1]
 
                 const argument = {
-                    "prompt": proompt,
+                    "prompt": prompt,
                     "params": {
                         "n": 1,
                         "max_context_length": db.maxContext + 100,
@@ -2275,8 +2255,8 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
             if(aiModel.startsWith('hf:::')){
                 const realModel = aiModel.split(":::")[1]
                 const suggesting = model === "submodel"
-                const proompt = applyChatTemplate(formated)
-                const v = await runTransformers(proompt, realModel, {
+                const prompt = applyChatTemplate(formated)
+                const v = await runTransformers(prompt, realModel, {
                     temperature: temperature,
                     max_new_tokens: maxTokens,
                     top_k: db.ooba.top_k,
@@ -2286,18 +2266,18 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
                 })
                 return {
                     type: 'success',
-                    result: unstringlizeChat(v.generated_text, formated, currentChar?.name ?? '')
+                    result: unstringlizeChat(v.generated_text as string, formated, currentChar?.name ?? '')
                 }
             }
             if(aiModel.startsWith('local_')){
                 console.log('running local model')
                 const suggesting = model === "submodel"
-                const proompt = applyChatTemplate(formated)
+                const prompt = applyChatTemplate(formated)
                 const stopStrings = getStopStrings(suggesting)
                 console.log(stopStrings)
                 const modelPath = aiModel.replace('local_', '')
                 const res = await runGGUFModel({
-                    prompt: proompt,
+                    prompt: prompt,
                     modelPath: modelPath,
                     temperature: temperature,
                     top_p: db.top_p,

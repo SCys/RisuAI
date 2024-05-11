@@ -1,4 +1,3 @@
-import { cloneDeep } from 'lodash'
 import type { Database } from 'src/ts/storage/database'
 
 export function templateCheck(db:Database){
@@ -27,14 +26,16 @@ export function templateCheck(db:Database){
             }
         }
         else if(c.type === 'chat'){
-            if(c.rangeStart !== 0){
-                startRanges.push(c.rangeStart)
-            }
-            if(c.rangeEnd !== 'end'){
-                endRanges.push(c.rangeEnd)
-            }
-            else{
-                reachEnd = true
+            if(c.rangeStart !== -1000){
+                if(c.rangeStart !== 0){
+                    startRanges.push(c.rangeStart)
+                }
+                if(c.rangeEnd !== 'end'){
+                    endRanges.push(c.rangeEnd)
+                }
+                else{
+                    reachEnd = true
+                }
             }
         }
         else if(c.type === 'description'){

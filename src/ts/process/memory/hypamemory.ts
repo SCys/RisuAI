@@ -1,27 +1,30 @@
 import localforage from "localforage";
-import { similarity } from "ml-distance";
 import { globalFetch } from "src/ts/storage/globalApi";
 import { runEmbedding } from "../transformers";
+import { alertError } from "src/ts/alert";
+import { appendLastPath } from "src/ts/util";
 
 
 export class HypaProcesser{
     oaikey:string
     vectors:memoryVector[]
     forage:LocalForage
-    model:'ada'|'MiniLM'
+    model:'ada'|'MiniLM'|'nomic'|'custom'
+    customEmbeddingUrl:string
 
-    constructor(model:'ada'|'MiniLM'){
+    constructor(model:'ada'|'MiniLM'|'nomic'|'custom',customEmbeddingUrl?:string){
         this.forage = localforage.createInstance({
             name: "hypaVector"
         })
         this.vectors = []
         this.model = model
+        this.customEmbeddingUrl = customEmbeddingUrl
     }
 
-    async embedDocuments(texts: string[]): Promise<number[][]> {
-        const subPrompts = chunkArray(texts,512);
+    async embedDocuments(texts: string[]): Promise<VectorArray[]> {
+        const subPrompts = chunkArray(texts,50);
     
-        const embeddings: number[][] = [];
+        const embeddings: VectorArray[] = [];
     
         for (let i = 0; i < subPrompts.length; i += 1) {
           const input = subPrompts[i];
@@ -35,35 +38,37 @@ export class HypaProcesser{
     }
     
     
-    async getEmbeds(input:string[]|string) {
-        if(this.model === 'MiniLM'){
+    async getEmbeds(input:string[]|string):Promise<VectorArray[]> {
+        if(this.model === 'MiniLM' || this.model === 'nomic'){
             const inputs:string[] = Array.isArray(input) ? input : [input]
-            let results:Float32Array[] = []
-            for(let i=0;i<inputs.length;i++){
-                const res = await runEmbedding(inputs[i])
-                results.push(res)
-            }
-            //convert to number[][]
-            const result:number[][] = []
-            for(let i=0;i<results.length;i++){
-                const res = results[i]
-                const arr:number[] = []
-                for(let j=0;j<res.length;j++){
-                    arr.push(res[j])
-                }
-                result.push(arr)
-            }
-            return result
+            let results:Float32Array[] = await runEmbedding(inputs, this.model === 'nomic' ? 'nomic-ai/nomic-embed-text-v1.5' : 'Xenova/all-MiniLM-L6-v2')
+            return results
         }
-        const gf = await globalFetch("https://api.openai.com/v1/embeddings", {
-            headers: {
-            "Authorization": "Bearer " + this.oaikey
-            },
-            body: {
-            "input": input,
-            "model": "text-embedding-ada-002"
+        let gf = null;
+        if(this.model === 'custom'){
+            if(!this.customEmbeddingUrl){
+                throw new Error('Custom model requires a Custom Server URL')
             }
-        })
+            const {customEmbeddingUrl} = this
+            const replaceUrl = customEmbeddingUrl.endsWith('/embeddings')?customEmbeddingUrl:appendLastPath(customEmbeddingUrl,'embeddings')
+            
+            gf = await globalFetch(replaceUrl.toString(), {
+                body:{
+                    "input": input
+                },
+            })
+        }
+        if(this.model === 'ada'){
+            gf = await globalFetch("https://api.openai.com/v1/embeddings", {
+                headers: {
+                "Authorization": "Bearer " + this.oaikey
+                },
+                body: {
+                "input": input,
+                "model": "text-embedding-ada-002"
+                }
+            })
+        }
         const data = gf.data
     
     
@@ -92,7 +97,7 @@ export class HypaProcesser{
     async addText(texts:string[]) {
 
         for(let i=0;i<texts.length;i++){
-            const itm:memoryVector = await this.forage.getItem(texts[i])
+            const itm:memoryVector = await this.forage.getItem(texts[i] + '|' + this.model)
             if(itm){
                 itm.alreadySaved = true
                 this.vectors.push(itm)
@@ -121,7 +126,7 @@ export class HypaProcesser{
         for(let i=0;i<memoryVectors.length;i++){
             const vec = memoryVectors[i]
             if(!vec.alreadySaved){
-                await this.forage.setItem(texts[i], vec)
+                await this.forage.setItem(texts[i] + '|' + this.model, vec)
             }
         }
 
@@ -139,15 +144,15 @@ export class HypaProcesser{
     }
 
     private async similaritySearchVectorWithScore(
-        query: number[],
+        query: VectorArray,
       ): Promise<[string, number][]> {
           const memoryVectors = this.vectors
           const searches = memoryVectors
-              .map((vector, index) => ({
-              similarity: similarity.cosine(query, vector.embedding),
-              index,
-              }))
-              .sort((a, b) => (a.similarity > b.similarity ? -1 : 0))
+                .map((vector, index) => ({
+                    similarity: similarity(query, vector.embedding),
+                    index,
+                }))
+                .sort((a, b) => (a.similarity > b.similarity ? -1 : 0))
       
           const result: [string, number][] = searches.map((search) => [
               memoryVectors[search.index].content,
@@ -158,13 +163,21 @@ export class HypaProcesser{
     }
 
     similarityCheck(query1:number[],query2: number[]) {
-        return similarity.cosine(query1, query2)
+        return similarity(query1, query2)
     }
 }
+function similarity(a:VectorArray, b:VectorArray) {    
+    let dot = 0;
+    for(let i=0;i<a.length;i++){
+        dot += a[i] * b[i]
+    }
+    return dot
+}
 
+type VectorArray = number[]|Float32Array
 
 type memoryVector = {
-    embedding:number[]
+    embedding:number[]|Float32Array,
     content:string,
     alreadySaved?:boolean
 }

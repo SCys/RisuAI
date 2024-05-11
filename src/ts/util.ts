@@ -8,6 +8,16 @@ import { basename } from "@tauri-apps/api/path"
 import { createBlankChar, getCharImage } from "./characters"
 import { appWindow } from '@tauri-apps/api/window';
 import { isTauri } from "./storage/globalApi"
+import { Marked } from "marked"
+
+const mconverted = new Marked({
+    gfm: true,
+    breaks: true,
+    silent: true,
+    tokenizer: {
+
+    }
+})
 
 export interface Messagec extends Message{
     index: number
@@ -492,4 +502,107 @@ export function trimUntilPunctuation(s:string){
         result = result.slice(0, -1)
     }
     return result
+}
+
+/**
+ * Appends the given last path to the provided URL.
+ *
+ * @param {string} url - The base URL to which the last path will be appended.
+ * @param {string} lastPath - The path to be appended to the URL.
+ * @returns {string} The modified URL with the last path appended.
+ * 
+ * @example
+ * appendLastPath("https://github.com/kwaroran/RisuAI","/commits/main")
+ * return 'https://github.com/kwaroran/RisuAI/commits/main'
+ * 
+ * @example
+ * appendLastPath("https://github.com/kwaroran/RisuAI/","/commits/main")
+ * return 'https://github.com/kwaroran/RisuAI/commits/main
+ * 
+ * @example
+ * appendLastPath("http://127.0.0.1:7997","embeddings")
+ * return 'http://127.0.0.1:7997/embeddings'
+ */
+export function appendLastPath(url, lastPath) {
+    // Remove trailing slash from url if exists
+    url = url.replace(/\/$/, '');
+    
+    // Remove leading slash from lastPath if exists
+    lastPath = lastPath.replace(/^\//, '');
+
+    // Concat the url and lastPath
+    return url + '/' + lastPath;
+}
+
+/**
+ * Converts the text content of a given Node object, including HTML elements, into a plain text sentence.
+ *
+ * @param {Node} node - The Node object from which the text content will be extracted.
+ * @returns {string} The plain text sentence representing the content of the Node object.
+ *
+ * @example
+ * const div = document.createElement('div');
+ * div.innerHTML = 'Hello<br>World<del>Deleted</del>';
+ * const sentence = getNodetextToSentence(div);
+ * console.log(sentence); // Output: "Hello\nWorld~Deleted~"
+ */
+export function getNodetextToSentence(node: Node): string {
+    let result = '';
+    for (const child of node.childNodes) {
+        if (child.nodeType === Node.TEXT_NODE) {
+            result += child.textContent;
+        } else if (child.nodeType === Node.ELEMENT_NODE) {
+            if (child.nodeName === 'BR') {
+                result += '\n';
+                continue;
+            }
+            
+            // If a child has a style it's not for a markdown formatting
+            const childStyle = (child as HTMLElement)?.style;
+            if (childStyle?.cssText!== '') {
+                result += getNodetextToSentence(child);
+                continue;
+            }
+            
+            // convert HTML elements to markdown format
+            if (child.nodeName === 'DEL') {
+                result += '~' + getNodetextToSentence(child) + '~';
+            } else if (child.nodeName === 'STRONG' || child.nodeName === 'B') {
+                result += '**' + getNodetextToSentence(child) + '**';
+            } else if (child.nodeName === 'EM' || child.nodeName === 'I') {
+                result += '*' + getNodetextToSentence(child) + '*';
+            } 
+            else {
+                result += getNodetextToSentence(child);
+            }
+        }
+    }
+    return result;
+}
+
+export function applyMarkdownToNode(node: Node) {
+    if (node.nodeType === Node.TEXT_NODE) {
+        const text = node.textContent;
+        if (text) {
+            let markdown = mconverted.parseInline(text);
+            if (markdown !== text) {
+                const span = document.createElement('span');
+                span.innerHTML = markdown;
+                
+                // inherit inline style from the parent node
+                const parentStyle = (node.parentNode as HTMLElement)?.style;
+                if(parentStyle){
+                    for(let i=0;i<parentStyle.length;i++){
+                        span.style.setProperty(parentStyle[i], parentStyle.getPropertyValue(parentStyle[i]))
+                    }   
+                }
+                (node as Element)?.replaceWith(span);
+                return
+            }
+        }
+    } else {
+        for (const child of node.childNodes) {
+            applyMarkdownToNode(child);
+        }
+    }
 }

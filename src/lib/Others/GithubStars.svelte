@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { MailIcon, MaximizeIcon, WalletIcon } from "lucide-svelte";
-  import { isTauri, openURL, toggleFullscreen } from "src/ts/storage/globalApi";
+    import { HomeIcon, MailIcon, MaximizeIcon, WalletIcon } from "lucide-svelte";
+    import { isTauri, openURL, toggleFullscreen } from "src/ts/storage/globalApi";
 
 </script>
 <svelte:head>
@@ -17,6 +17,11 @@
       <img src="/icon/github-mark-white.svg" width="24" alt="github" />
     </button>
   {/if}
+  <button class="text-textcolor" on:click={() => {
+    openURL("https://risuai.net/")
+  }}>
+    <HomeIcon size={24} />
+  </button>
   <button class="text-textcolor" on:click={() => {
     openURL("https://www.patreon.com/RisuAI")
   }}>

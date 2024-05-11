@@ -15,41 +15,42 @@ export async function stableDiff(currentChar: character, prompt: string) {
     return false;
   }
 
-  const proompt = `Chat:\n${prompt}`;
 
-  const promptbody: OpenAIChat[] = [
-    {
-      role: "system",
-      content: currentChar.newGenData.instructions,
-    },
-    {
-      role: "user",
-      content: proompt,
-    },
-  ];
+    const promptItem = `Chat:\n${prompt}`
 
-  const rq = await requestChatData(
-    {
-      formated: promptbody,
-      currentChar: currentChar,
-      temperature: 0.2,
-      maxTokens: 300,
-      bias: {},
-    },
-    "submodel"
-  );
+    const promptbody:OpenAIChat[] = [
+        {
 
-  if (rq.type === "fail" || rq.type === "streaming" || rq.type === "multiline") {
-    alertError(`${rq.result}`);
-    return false;
-  }
+            role:'system',
+            content: currentChar.newGenData.instructions
+        },
+        {
+            role: 'user',
+            content: promptItem
+        },
+    ]
 
-  const r = rq.result;
+    const rq = await requestChatData({
+        formated: promptbody,
+        currentChar: currentChar,
+        temperature: 0.2,
+        maxTokens: 300,
+        bias: {}
+    }, 'submodel')
 
-  const genPrompt = currentChar.newGenData.prompt.replaceAll("{{slot}}", r);
-  const neg = currentChar.newGenData.negative;
 
-  return await generateAIImage(genPrompt, currentChar, neg, "");
+    if(rq.type === 'fail' || rq.type === 'streaming' || rq.type === 'multiline'){
+        alertError(`${rq.result}`)
+        return false
+    }
+
+    const r = rq.result
+
+
+    const genPrompt = currentChar.newGenData.prompt.replaceAll('{{slot}}', r)
+    const neg = currentChar.newGenData.negative
+
+    return await generateAIImage(genPrompt, currentChar, neg, '')
 }
 
 export async function generateAIImage(genPrompt: string, currentChar: character, neg: string, returnSdData: string) {

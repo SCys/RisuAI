@@ -13,7 +13,6 @@ import { exampleMessage } from "./exampleMessages";
 import { sayTTS } from "./tts";
 import { supaMemory } from "./memory/supaMemory";
 import { v4 } from "uuid";
-import { cloneDeep } from "lodash";
 import { groupOrder } from "./group";
 import { runTrigger } from "./triggers";
 import { HypaProcesser } from "./memory/hypamemory";
@@ -26,6 +25,7 @@ import { runInlayScreen } from "./inlayScreen";
 import { runCharacterJS } from "../plugins/embedscript";
 import { addRerolls } from "./prereroll";
 import { runImageEmbedding } from "./transformers";
+import { hanuraiMemory } from "./memory/hanuraiMemory";
 
 export interface OpenAIChat{
     role: 'system'|'user'|'assistant'|'function'
@@ -206,7 +206,7 @@ export async function sendChat(chatProcessIndex = -1,arg:{chatAdditonalTokens?:n
         'personaPrompt':([] as OpenAIChat[])
     }
 
-    let promptTemplate = cloneDeep(db.promptTemplate)
+    let promptTemplate = structuredClone(db.promptTemplate)
     const usingPromptTemplate = !!promptTemplate
     if(promptTemplate){
         let hasPostEverything = false
@@ -223,7 +223,7 @@ export async function sendChat(chatProcessIndex = -1,arg:{chatAdditonalTokens?:n
             })
         }
     }
-    if(currentChar.utilityBot && (!(usingPromptTemplate && db.proomptSettings.utilOverride))){
+    if(currentChar.utilityBot && (!(usingPromptTemplate && db.promptSettings.utilOverride))){
         promptTemplate = [
             {
               "type": "plain",
@@ -299,7 +299,7 @@ export async function sendChat(chatProcessIndex = -1,arg:{chatAdditonalTokens?:n
         })
     }
 
-    if(db.chainOfThought && (!(usingPromptTemplate && db.proomptSettings.customChainOfThought))){
+    if(db.chainOfThought && (!(usingPromptTemplate && db.promptSettings.customChainOfThought))){
         unformated.postEverything.push({
             role: 'system',
             content: `<instruction> - before respond everything, Think step by step as a ai assistant how would you respond inside <Thoughts> xml tag. this must be less than 5 paragraphs.</instruction>`
@@ -393,7 +393,7 @@ export async function sendChat(chatProcessIndex = -1,arg:{chatAdditonalTokens?:n
         for(const card of template){
             switch(card.type){
                 case 'persona':{
-                    let pmt = cloneDeep(unformated.personaPrompt)
+                    let pmt = structuredClone(unformated.personaPrompt)
                     if(card.innerFormat && pmt.length > 0){
                         for(let i=0;i<pmt.length;i++){
                             pmt[i].content = risuChatParser(card.innerFormat, {chara: currentChar}).replace('{{slot}}', pmt[i].content)
@@ -404,7 +404,7 @@ export async function sendChat(chatProcessIndex = -1,arg:{chatAdditonalTokens?:n
                     break
                 }
                 case 'description':{
-                    let pmt = cloneDeep(unformated.description)
+                    let pmt = structuredClone(unformated.description)
                     if(card.innerFormat && pmt.length > 0){
                         for(let i=0;i<pmt.length;i++){
                             pmt[i].content = risuChatParser(card.innerFormat, {chara: currentChar}).replace('{{slot}}', pmt[i].content)
@@ -415,7 +415,7 @@ export async function sendChat(chatProcessIndex = -1,arg:{chatAdditonalTokens?:n
                     break
                 }
                 case 'authornote':{
-                    let pmt = cloneDeep(unformated.authorNote)
+                    let pmt = structuredClone(unformated.authorNote)
                     if(card.innerFormat && pmt.length > 0){
                         for(let i=0;i<pmt.length;i++){
                             pmt[i].content = risuChatParser(card.innerFormat, {chara: currentChar}).replace('{{slot}}', pmt[i].content || card.defaultText || '')
@@ -431,10 +431,10 @@ export async function sendChat(chatProcessIndex = -1,arg:{chatAdditonalTokens?:n
                 }
                 case 'postEverything':{
                     await tokenizeChatArray(unformated.postEverything)
-                    if(usingPromptTemplate && db.proomptSettings.postEndInnerFormat){
+                    if(usingPromptTemplate && db.promptSettings.postEndInnerFormat){
                         await tokenizeChatArray([{
                             role: 'system',
-                            content: db.proomptSettings.postEndInnerFormat
+                            content: db.promptSettings.postEndInnerFormat
                         }])
                     }
                     break
@@ -478,6 +478,10 @@ export async function sendChat(chatProcessIndex = -1,arg:{chatAdditonalTokens?:n
                 case 'chat':{
                     let start = card.rangeStart
                     let end = (card.rangeEnd === 'end') ? unformated.chats.length : card.rangeEnd
+                    if(start === -1000){
+                        start = 0
+                        end = unformated.chats.length
+                    }
                     if(start < 0){
                         start = unformated.chats.length + start
                         if(start < 0){
@@ -496,7 +500,7 @@ export async function sendChat(chatProcessIndex = -1,arg:{chatAdditonalTokens?:n
                     }
                     let chats = unformated.chats.slice(start, end)
 
-                    if(usingPromptTemplate && db.proomptSettings.sendChatAsSystem && (!card.chatAsOriginalOnSystem)){
+                    if(usingPromptTemplate && db.promptSettings.sendChatAsSystem && (!card.chatAsOriginalOnSystem)){
                         chats = systemizeChat(chats)
                     }
                     await tokenizeChatArray(chats)
@@ -544,7 +548,7 @@ export async function sendChat(chatProcessIndex = -1,arg:{chatAdditonalTokens?:n
             'editprocess'))
         }
 
-        if(usingPromptTemplate && db.proomptSettings.sendName){
+        if(usingPromptTemplate && db.promptSettings.sendName){
             chat.content = `${currentChar.name}: ${chat.content}`
             chat.attr = ['nameAdded']
         }
@@ -621,13 +625,13 @@ export async function sendChat(chatProcessIndex = -1,arg:{chatAdditonalTokens?:n
 
         let attr:string[] = []
 
-        if(nowChatroom.type === 'group' || (usingPromptTemplate && db.proomptSettings.sendName)){
+        if(nowChatroom.type === 'group' || (usingPromptTemplate && db.promptSettings.sendName)){
             formatedChat = name + ': ' + formatedChat
             attr.push('nameAdded')
         }
-        if(usingPromptTemplate && db.proomptSettings.customChainOfThought && db.proomptSettings.maxThoughtTagDepth !== -1){
+        if(usingPromptTemplate && db.promptSettings.customChainOfThought && db.promptSettings.maxThoughtTagDepth !== -1){
             const depth = ms.length - index
-            if(depth >= db.proomptSettings.maxThoughtTagDepth){
+            if(depth >= db.promptSettings.maxThoughtTagDepth){
                 formatedChat = formatedChat.replace(/<Thoughts>(.+?)<\/Thoughts>/gm, '')
             }
         }
@@ -647,22 +651,39 @@ export async function sendChat(chatProcessIndex = -1,arg:{chatAdditonalTokens?:n
         index++
     }
 
-    if(nowChatroom.supaMemory && db.supaMemoryType !== 'none'){
+    
+    if(nowChatroom.supaMemory && (db.supaMemoryType !== 'none' || db.hanuraiEnable)){
         chatProcessStage.set(2)
-        const sp = await supaMemory(chats, currentTokens, maxContextTokens, currentChat, nowChatroom, tokenizer, {
-            asHyper: db.hypaMemory
-        })
-        if(sp.error){
-            alertError(sp.error)
-            return false
+        if(db.hanuraiEnable){
+            const hn = await hanuraiMemory(chats, {
+                currentTokens,
+                maxContextTokens,
+                tokenizer
+            })
+
+            if(hn === false){
+                return false
+            }
+
+            chats = hn.chats
+            currentTokens = hn.tokens
         }
-        chats = sp.chats
-        currentTokens = sp.currentTokens
-        currentChat.supaMemoryData = sp.memory ?? currentChat.supaMemoryData
-        db.characters[selectedChar].chats[selectedChat].supaMemoryData = currentChat.supaMemoryData
-        console.log(currentChat.supaMemoryData)
-        DataBase.set(db)
-        currentChat.lastMemory = sp.lastId ?? currentChat.lastMemory
+        else{
+            const sp = await supaMemory(chats, currentTokens, maxContextTokens, currentChat, nowChatroom, tokenizer, {
+                asHyper: db.hypaMemory
+            })
+            if(sp.error){
+                alertError(sp.error)
+                return false
+            }
+            chats = sp.chats
+            currentTokens = sp.currentTokens
+            currentChat.supaMemoryData = sp.memory ?? currentChat.supaMemoryData
+            db.characters[selectedChar].chats[selectedChat].supaMemoryData = currentChat.supaMemoryData
+            console.log(currentChat.supaMemoryData)
+            DataBase.set(db)
+            currentChat.lastMemory = sp.lastId ?? currentChat.lastMemory;
+        }
         chatProcessStage.set(1)
     }
     else{
@@ -703,6 +724,9 @@ export async function sendChat(chatProcessIndex = -1,arg:{chatAdditonalTokens?:n
                 content: '',
             } as const
         }
+        else{
+            v.content = `<Previous Conversation>${v.content}</Previous Conversation>`
+        }
         return v
     }).filter((v) => {
         return v.content !== ''
@@ -734,7 +758,7 @@ export async function sendChat(chatProcessIndex = -1,arg:{chatAdditonalTokens?:n
     //make into one
 
     let formated:OpenAIChat[] = []
-    const formatOrder = cloneDeep(db.formatingOrder)
+    const formatOrder = structuredClone(db.formatingOrder)
     if(formatOrder){
         formatOrder.push('postEverything')
     }
@@ -778,7 +802,7 @@ export async function sendChat(chatProcessIndex = -1,arg:{chatAdditonalTokens?:n
         for(const card of template){
             switch(card.type){
                 case 'persona':{
-                    let pmt = cloneDeep(unformated.personaPrompt)
+                    let pmt = structuredClone(unformated.personaPrompt)
                     if(card.innerFormat && pmt.length > 0){
                         for(let i=0;i<pmt.length;i++){
                             pmt[i].content = risuChatParser(card.innerFormat, {chara: currentChar}).replace('{{slot}}', pmt[i].content)
@@ -789,7 +813,7 @@ export async function sendChat(chatProcessIndex = -1,arg:{chatAdditonalTokens?:n
                     break
                 }
                 case 'description':{
-                    let pmt = cloneDeep(unformated.description)
+                    let pmt = structuredClone(unformated.description)
                     if(card.innerFormat && pmt.length > 0){
                         for(let i=0;i<pmt.length;i++){
                             pmt[i].content = risuChatParser(card.innerFormat, {chara: currentChar}).replace('{{slot}}', pmt[i].content)
@@ -800,7 +824,7 @@ export async function sendChat(chatProcessIndex = -1,arg:{chatAdditonalTokens?:n
                     break
                 }
                 case 'authornote':{
-                    let pmt = cloneDeep(unformated.authorNote)
+                    let pmt = structuredClone(unformated.authorNote)
                     if(card.innerFormat && pmt.length > 0){
                         for(let i=0;i<pmt.length;i++){
                             pmt[i].content = risuChatParser(card.innerFormat, {chara: currentChar}).replace('{{slot}}', pmt[i].content || card.defaultText || '')
@@ -816,10 +840,10 @@ export async function sendChat(chatProcessIndex = -1,arg:{chatAdditonalTokens?:n
                 }
                 case 'postEverything':{
                     pushPrompts(unformated.postEverything)
-                    if(usingPromptTemplate && db.proomptSettings.postEndInnerFormat){
+                    if(usingPromptTemplate && db.promptSettings.postEndInnerFormat){
                         pushPrompts([{
                             role: 'system',
-                            content: db.proomptSettings.postEndInnerFormat
+                            content: db.promptSettings.postEndInnerFormat
                         }])
                     }
                     break
@@ -863,6 +887,10 @@ export async function sendChat(chatProcessIndex = -1,arg:{chatAdditonalTokens?:n
                 case 'chat':{
                     let start = card.rangeStart
                     let end = (card.rangeEnd === 'end') ? unformated.chats.length : card.rangeEnd
+                    if(start === -1000){
+                        start = 0
+                        end = unformated.chats.length
+                    }
                     if(start < 0){
                         start = unformated.chats.length + start
                         if(start < 0){
@@ -881,14 +909,14 @@ export async function sendChat(chatProcessIndex = -1,arg:{chatAdditonalTokens?:n
                     }
 
                     let chats = unformated.chats.slice(start, end)
-                    if(usingPromptTemplate && db.proomptSettings.sendChatAsSystem && (!card.chatAsOriginalOnSystem)){
+                    if(usingPromptTemplate && db.promptSettings.sendChatAsSystem && (!card.chatAsOriginalOnSystem)){
                         chats = systemizeChat(chats)
                     }
                     pushPrompts(chats)
                     break
                 }
                 case 'memory':{
-                    let pmt = cloneDeep(memories)
+                    let pmt = structuredClone(memories)
                     if(card.innerFormat && pmt.length > 0){
                         for(let i=0;i<pmt.length;i++){
                             pmt[i].content = risuChatParser(card.innerFormat, {chara: currentChar}).replace('{{slot}}', pmt[i].content)
