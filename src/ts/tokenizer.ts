@@ -35,6 +35,11 @@ export async function encode(data:string):Promise<(number[]|Uint32Array|Int32Arr
             case 'llama3':
                 return await tokenizeWebTokenizers(data, 'llama')
             default:
+                // Add exception for gpt-4o tokenizers on reverse_proxy
+                if(db.proxyRequestModel?.startsWith('gpt4o') || 
+                (db.proxyRequestModel === 'custom' && db.customProxyRequestModel.startsWith('gpt-4o'))) {
+                    return await tikJS(data, 'o200k_base')
+                }
                 return await tikJS(data)
         }
     }
@@ -70,6 +75,9 @@ export async function encode(data:string):Promise<(number[]|Uint32Array|Int32Arr
             return await tokenizeWebTokenizers(data, 'llama')
         }
     }
+    if(db.aiModel.startsWith('gpt4o')){
+        return await tikJS(data, 'o200k_base')
+    }
 
     return await tikJS(data)
 }
@@ -79,17 +87,31 @@ type tokenizerType = 'novellist'|'claude'|'novelai'|'llama'|'mistral'|'llama3'
 let tikParser:Tiktoken = null
 let tokenizersTokenizer:Tokenizer = null
 let tokenizersType:tokenizerType = null
+let lastTikModel = 'cl100k_base'
 
-async function tikJS(text:string) {
-    if(!tikParser){
-        const {Tiktoken} = await import('@dqbd/tiktoken')
-        const cl100k_base = await import("@dqbd/tiktoken/encoders/cl100k_base.json");
-    
-        tikParser = new Tiktoken(
-            cl100k_base.bpe_ranks,
-            cl100k_base.special_tokens,
-            cl100k_base.pat_str
-        );
+async function tikJS(text:string, model='cl100k_base') {
+    if(!tikParser || lastTikModel !== model){
+        if(model === 'cl100k_base'){
+            const {Tiktoken} = await import('@dqbd/tiktoken')
+            const cl100k_base = await import("@dqbd/tiktoken/encoders/cl100k_base.json");
+            lastTikModel = model   
+        
+            tikParser = new Tiktoken(
+                cl100k_base.bpe_ranks,
+                cl100k_base.special_tokens,
+                cl100k_base.pat_str
+            );
+        }
+        if(model === 'o200k_base'){
+            const {Tiktoken} = await import('@dqbd/tiktoken')
+            const o200k_base = await import("src/etc/o200k_base.json");
+            lastTikModel = model
+            tikParser = new Tiktoken(
+                o200k_base.bpe_ranks,
+                o200k_base.special_tokens,
+                o200k_base.pat_str
+            );
+        }
     }
     return tikParser.encode(text)
 }

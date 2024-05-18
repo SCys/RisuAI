@@ -172,6 +172,8 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
         case 'mistral-large-latest':
         case 'gpt4_turbo_20240409':
         case 'gpt4_turbo':
+        case 'gpt4o':
+        case 'gpt4o-2024-05-13':
         case 'reverse_proxy':{
             let formatedChat:OpenAIChatExtra[] = []
             for(let i=0;i<formated.length;i++){
@@ -417,6 +419,8 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
                     : requestModel === 'gpt4_0314' ? 'gpt-4-0314'
                     : requestModel === 'gpt4_turbo_20240409' ? 'gpt-4-turbo-2024-04-09'
                     : requestModel === 'gpt4_turbo' ? 'gpt-4-turbo'
+                    : requestModel === 'gpt4o' ? 'gpt-4o'
+                    : requestModel === 'gpt4o-2024-05-13' ? 'gpt-4o-2024-05-13'
                     : (!requestModel) ? 'gpt-3.5-turbo'
                     : requestModel,
                 messages: formatedChat,
@@ -491,12 +495,12 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
 
             if(supportsInlayImage()){
                 // inlay models doesn't support logit_bias
-                // gpt-4-turbo supports both logit_bias and inlay image
+                // OpenAI's gpt based llm model supports both logit_bias and inlay image
                 if(!(
-                    aiModel.startsWith('gpt4_turbo') || 
+                    aiModel.startsWith('gpt') || 
                     (aiModel == 'reverse_proxy' && (
-                        db.proxyRequestModel?.startsWith('gpt4_turbo') ||
-                        (db.proxyRequestModel === 'custom' && db.customProxyRequestModel.startsWith('gpt-4-turbo'))
+                        db.proxyRequestModel?.startsWith('gpt') ||
+                        (db.proxyRequestModel === 'custom' && db.customProxyRequestModel.startsWith('gpt'))
                     )))){
                     // @ts-ignore
                     delete body.logit_bias
@@ -1146,6 +1150,7 @@ export async function requestChatDataMain(arg:requestDataArgument, model:'model'
         case 'gemini-pro':
         case 'gemini-pro-vision':
         case 'gemini-1.5-pro-latest':
+        case 'gemini-1.5-flash':
         case 'gemini-ultra':
         case 'gemini-ultra-vision':{
             interface GeminiPart{
